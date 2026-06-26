@@ -1,0 +1,18 @@
+# Session data — never commit
+projects/
+session-contracts/
+paste-images/
+voice-transcripts.jsonl
+discernment-log.jsonl
+active-session-id
+pomodoro-signal.json
+pomodoro-state.json
+session-3p-seen.jsonl
+history_backups/
+
+# Secrets / env
+*.env
+.env
+
+# macOS
+.DS_Store
