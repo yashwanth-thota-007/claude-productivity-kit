@@ -78,9 +78,11 @@ DEFAULT_POMO_PRESETS = [25, 50, 90]
 DEFAULT_OVERLAY_POS  = "top-right"
 DEFAULT_WAKE_WORD    = False
 
-SILENCE_OPTIONS     = [0.5, 1.0, 1.5, 2.0, 3.0]
-OVERLAY_POSITIONS   = ["top-right", "top-left", "bottom-right", "bottom-left"]
-POMO_PRESET_OPTIONS = [15, 25, 50, 90, 120]
+SILENCE_OPTIONS          = [0.5, 1.0, 1.5, 2.0, 3.0]
+OVERLAY_POSITIONS        = ["top-right", "top-left", "bottom-right", "bottom-left"]
+POMO_PRESET_OPTIONS      = [15, 25, 50, 90, 120]
+FOCUS_GUARD_MULTIPLIER = 2       # threshold = Pomodoro duration × this
+FOCUS_BREAK_THRESHOLD  = 15 * 60  # 15 min gap resets accumulated focus
 
 
 def load_settings() -> dict:
@@ -829,9 +831,17 @@ class VoiceApp(rumps.App):
         # Pomodoro
         self._pomo_end       = 0.0   # epoch when timer expires
         self._pomo_title     = ""
-        self._pomo_timer     = None
-        self._pomo_warned    = False  # True after 5-min warning fires
-        self._signal_mtime   = 0.0   # mtime of last processed signal file
+        self._pomo_timer      = None
+        self._pomo_warned     = False
+        self._signal_mtime    = 0.0
+        self._pomo_started_at = 0.0
+        self._pomo_ended_at   = 0.0
+
+        # Focus guard — resets per session, threshold = duration × FOCUS_GUARD_MULTIPLIER
+        self._focus_accumulated = 0.0
+        self._focus_threshold   = 0
+        self._focus_fired       = False
+        self._focus_session_id  = ""     # session that owns current focus block
 
         # Status
         self.status_item = rumps.MenuItem("Status: Loading model...")
@@ -867,8 +877,13 @@ class VoiceApp(rumps.App):
         # Pomodoro menu — pre-create one slot per possible preset value
         self.pomo_status_item = rumps.MenuItem("🍅 No timer")
         pomo_menu = rumps.MenuItem("Pomodoro")
+        # Up to 3 recent session name slots (pre-created, updated by _refresh_session_slots)
+        self._session_slots = [rumps.MenuItem("") for _ in range(3)]
+        for slot in self._session_slots:
+            pomo_menu.add(slot)
         pomo_menu.add(self.pomo_status_item)
         pomo_menu.add(None)
+        self._refresh_session_slots()
         self._pomo_preset_slots = []
         for mins in POMO_PRESET_OPTIONS:
             active = mins in self._cfg["pomo_presets"]
@@ -927,6 +942,13 @@ class VoiceApp(rumps.App):
         self._wake_item.state = self._cfg["wake_word"]
         settings_menu.add(self._wake_item)
 
+        # Focus guard status + reset in Pomodoro menu
+        self._focus_status_item = rumps.MenuItem("🧠 Focus: 0 sessions")
+        self._focus_reset_item  = rumps.MenuItem("  Reset focus guard", callback=self._reset_focus_guard)
+        pomo_menu.add(None)
+        pomo_menu.add(self._focus_status_item)
+        pomo_menu.add(self._focus_reset_item)
+
         self.menu = [
             self.status_item,
             None,
@@ -948,6 +970,28 @@ class VoiceApp(rumps.App):
         threading.Thread(target=self._signal_poller, daemon=True).start()
         if self._cfg["wake_word"]:
             self._wake_listener.start()
+
+    # ── Session slots ────────────────────────────────────────────────────────
+
+    def _refresh_session_slots(self):
+        """Show up to 3 most recent active sessions from contracts dir."""
+        contracts_dir = Path.home() / ".claude" / "session-contracts"
+        sessions = []
+        if contracts_dir.exists():
+            files = sorted(contracts_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            for f in files[:3]:
+                try:
+                    c = json.loads(f.read_text())
+                    if c.get("_skipped"):
+                        continue
+                    title  = c.get("session_title", "untitled")
+                    effort = c.get("effort", "normal")
+                    icon   = {"quick": "⚡", "deep": "🔬"}.get(effort, "📋")
+                    sessions.append(f"{icon} {title}")
+                except Exception:
+                    continue
+        for i, slot in enumerate(self._session_slots):
+            slot.title = sessions[i] if i < len(sessions) else ""
 
     # ── Recent transcripts ───────────────────────────────────────────────────
 
@@ -1240,7 +1284,9 @@ class VoiceApp(rumps.App):
         )
 
     def _capture_screenshot(self):
-        """Double Ctrl+S — region screenshot → save to session folder → paste @path."""
+        """Option+Ctrl — region screenshot → save to session folder → paste @path."""
+        # Pause wake listener — screencapture takes mic/audio exclusively and crashes the tap
+        self._wake_listener.pause()
         result = subprocess.run(
             ["osascript", "-e",
              'tell application "System Events" to name of first process whose frontmost is true'],
@@ -1286,6 +1332,7 @@ class VoiceApp(rumps.App):
 
         if not out.exists() or out.stat().st_size == 0:
             self._reset_idle("Screenshot cancelled.")
+            self._wake_listener.resume()
             return
 
         play_sound(SOUND_SCREENSHOT)
@@ -1311,6 +1358,7 @@ class VoiceApp(rumps.App):
                 capture_output=True,
             )
             self._reset_idle("Ready")
+        self._wake_listener.resume()
 
     def _refresh_voice_session_item(self):
         if VOICE_SESSION_FILE.exists():
@@ -1456,7 +1504,10 @@ class VoiceApp(rumps.App):
     def _pomo_start(self, minutes: int, title: str = ""):
         if self._pomo_timer:
             self._pomo_timer.cancel()
-        self._pomo_end    = time.time() + minutes * 60
+        now = time.time()
+        self._pomo_started_at = now
+        self._pomo_mins       = minutes
+        self._pomo_end        = now + minutes * 60
         self._pomo_title  = title or f"{minutes} min session"
         self._pomo_warned = False
         self._pomo_tick()
@@ -1475,6 +1526,32 @@ class VoiceApp(rumps.App):
         self.title = ICON_IDLE
         POMODORO_STATE.unlink(missing_ok=True)
 
+    def _accumulate_focus(self, elapsed_secs: float):
+        self._focus_accumulated += elapsed_secs
+        total_mins = int(self._focus_accumulated / 60)
+        self._focus_status_item.title = f"🧠 Focus: {total_mins} min / {self._focus_threshold} min"
+        if not self._focus_fired and self._focus_threshold > 0 and self._focus_accumulated >= self._focus_threshold * 60:
+            self._focus_fired = True
+            play_sound(SOUND_POMO)
+            rumps.notification(
+                "Focus Guard",
+                f"{total_mins} min of focused work",
+                "Time for a proper break — step away for 15+ minutes.",
+                sound=False,
+            )
+            self._overlay.show(
+                f"🧠 **Focus guard**\n\n{total_mins} minutes of focused work. "
+                "Step away for at least 15 minutes."
+            )
+
+    def _reset_focus_guard(self, _=None):
+        self._focus_accumulated = 0.0
+        self._focus_threshold   = 0
+        self._focus_fired       = False
+        self._focus_status_item.title = "🧠 Focus: 0 min"
+        self.status_item.title = "Status: Focus guard reset"
+        threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
+
     def _pomo_tick(self):
         remaining = self._pomo_end - time.time()
 
@@ -1489,7 +1566,10 @@ class VoiceApp(rumps.App):
                 "Time's up — take a break.",
                 sound=False,
             )
-            self._pomo_timer = None
+            self._pomo_timer    = None
+            self._pomo_ended_at = time.time()
+            pomo_mins = getattr(self, "_pomo_mins", 25)
+            self._accumulate_focus(pomo_mins * 60)
             return
 
         mins = int(remaining // 60)
@@ -1535,9 +1615,20 @@ class VoiceApp(rumps.App):
                 if mtime <= self._signal_mtime:
                     continue
                 self._signal_mtime = mtime
-                signal = json.loads(POMODORO_SIGNAL.read_text())
-                minutes = int(signal.get("minutes", 50))
-                title   = signal.get("title", "")
+                signal     = json.loads(POMODORO_SIGNAL.read_text())
+                minutes    = int(signal.get("minutes", 50))
+                title      = signal.get("title", "")
+                session_id = signal.get("session_id", "")
+
+                # New session → reset focus guard for this session's timebox
+                if session_id and session_id != self._focus_session_id:
+                    self._focus_session_id  = session_id
+                    self._focus_accumulated = 0.0
+                    self._focus_threshold   = minutes * FOCUS_GUARD_MULTIPLIER
+                    self._focus_fired       = False
+                    self._focus_status_item.title = f"🧠 Focus: 0 min / {self._focus_threshold} min"
+
+                self._refresh_session_slots()
                 self._pomo_start(minutes, title)
             except Exception:
                 pass
