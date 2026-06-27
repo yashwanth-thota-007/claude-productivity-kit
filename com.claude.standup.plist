@@ -21,6 +21,8 @@
         <string>us-east-1</string>
         <key>ANTHROPIC_SMALL_FAST_MODEL</key>
         <string>YOUR_HAIKU_MODEL_ID</string>
+        <key>SLACK_STANDUP_WEBHOOK</key>
+        <string>https://hooks.slack.com/services/YOUR/WEBHOOK/URL</string>
     </dict>
     <key>StartCalendarInterval</key>
     <array>

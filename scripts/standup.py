@@ -6,14 +6,13 @@ Usage:
   python3 ~/.claude/scripts/standup.py           # post to Slack
   python3 ~/.claude/scripts/standup.py --dry-run # print only, no post
 
-Reads SLACK_STANDUP_WEBHOOK from ~/.claude/.env
+Reads SLACK_STANDUP_WEBHOOK from environment (set in settings.json env block).
 """
 import json, os, sys, boto3, urllib.request, urllib.error
 from pathlib import Path
 from datetime import datetime, timedelta
 
 REPLAYS_DIR = Path.home() / ".claude" / "session-replays"
-ENV_FILE    = Path.home() / ".claude" / ".env"
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 MODEL_ID   = os.environ.get(
@@ -46,16 +45,6 @@ Rules:
 - Don't say "I worked on" — just state what was done/planned
 - Output the standup text only, no preamble"""
 
-
-def load_env() -> dict:
-    env = {}
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                env[k.strip()] = v.strip()
-    return env
 
 
 def recent_replays(hours: int = 24) -> list[str]:
@@ -130,10 +119,9 @@ def main():
         print("(dry-run — not posting to Slack)")
         sys.exit(0)
 
-    env = load_env()
-    webhook = env.get("SLACK_STANDUP_WEBHOOK") or os.environ.get("SLACK_STANDUP_WEBHOOK", "")
+    webhook = os.environ.get("SLACK_STANDUP_WEBHOOK", "")
     if not webhook:
-        print("No SLACK_STANDUP_WEBHOOK found in ~/.claude/.env — not posting.", file=sys.stderr)
+        print("No SLACK_STANDUP_WEBHOOK in environment — set it in settings.json env block.", file=sys.stderr)
         sys.exit(1)
 
     ok = post_to_slack(webhook, standup)

@@ -8,7 +8,8 @@
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": "YOUR_HAIKU_MODEL_ID",
         "ENABLE_EXPERIMENTAL_MCP_CLI": "true",
         "ENABLE_PROMPT_CACHING_1H_BEDROCK": "1",
-        "ENABLE_PROMPT_CACHING_1H": "1"
+        "ENABLE_PROMPT_CACHING_1H": "1",
+        "SLACK_STANDUP_WEBHOOK": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
     },
     "permissions": {
         "defaultMode": "auto"

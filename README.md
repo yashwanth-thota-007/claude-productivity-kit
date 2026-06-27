@@ -99,7 +99,7 @@ cp com.claude.daily-brief.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.claude.daily-brief.plist
 
 # Optional: daily standup to Slack
-echo "SLACK_STANDUP_WEBHOOK=https://hooks.slack.com/your-webhook-url" >> ~/.claude/.env
+# Set SLACK_STANDUP_WEBHOOK in settings.json env block, then:
 cp com.claude.standup.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.claude.standup.plist
 ```
@@ -129,6 +129,7 @@ Set in `settings.json` under `"env"`:
 | `ANTHROPIC_MODEL` | Main model ID (Sonnet/Opus) |
 | `ANTHROPIC_SMALL_FAST_MODEL` | Fast model ID (Haiku) for background scripts |
 | `ENABLE_PROMPT_CACHING_1H_BEDROCK` | Enable 1h prompt cache on Bedrock |
+| `SLACK_STANDUP_WEBHOOK` | Slack incoming webhook URL for `/standup` |
 
 ---
 
