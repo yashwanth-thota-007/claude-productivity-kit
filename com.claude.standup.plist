@@ -7,20 +7,20 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/Users/yashwanth.thota/.claude/scripts/standup.py</string>
+        <string>CLAUDE_HOME/.claude/scripts/standup.py</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>/Users/yashwanth.thota</string>
+        <string>CLAUDE_HOME</string>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin</string>
         <key>AWS_PROFILE</key>
-        <string>production/developer</string>
+        <string>YOUR_AWS_PROFILE</string>
         <key>AWS_REGION</key>
-        <string>eu-central-1</string>
+        <string>us-east-1</string>
         <key>ANTHROPIC_SMALL_FAST_MODEL</key>
-        <string>eu.anthropic.claude-haiku-4-5-20251001-v1:0</string>
+        <string>YOUR_HAIKU_MODEL_ID</string>
     </dict>
     <key>StartCalendarInterval</key>
     <array>

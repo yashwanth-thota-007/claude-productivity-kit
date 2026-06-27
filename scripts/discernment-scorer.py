@@ -24,7 +24,7 @@ MODEL_ID              = os.environ.get(
     "ANTHROPIC_SMALL_FAST_MODEL",
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 )
-AWS_REGION = os.environ.get("AWS_REGION", "eu-central-1")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 SCORE_PROMPT = """\
 You are an AI quality evaluator. Score the LAST assistant response across three dimensions.

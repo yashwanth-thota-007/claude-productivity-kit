@@ -17,3 +17,29 @@ session-replays/
 
 # macOS
 .DS_Store
+
+# Personal settings — copy from settings.example.json and fill in your values
+settings.json
+settings.local.json
+
+# Runtime / cache files
+*.jsonl
+history.jsonl
+stats-cache.json
+smart-compact.config.json
+mcp-needs-auth-cache.json
+voice-menubar-settings.json
+voice-session-id
+policy-limits.json
+statsig/
+cache/
+backups/
+debug/
+downloads/
+shell-snapshots/
+file-history/
+ide/
+plans/
+sessions/
+plugins/cache/
+plugins/data/

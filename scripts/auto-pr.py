@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 
 REPLAYS_DIR = Path.home() / ".claude" / "session-replays"
-AWS_REGION  = os.environ.get("AWS_REGION", "eu-central-1")
+AWS_REGION  = os.environ.get("AWS_REGION", "us-east-1")
 MODEL_ID    = os.environ.get(
     "ANTHROPIC_SMALL_FAST_MODEL",
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0",

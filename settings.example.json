@@ -1,0 +1,37 @@
+{
+    "env": {
+        "AWS_PROFILE": "YOUR_AWS_PROFILE",
+        "AWS_REGION": "us-east-1",
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "ANTHROPIC_MODEL": "YOUR_SONNET_MODEL_ID",
+        "ANTHROPIC_SMALL_FAST_MODEL": "YOUR_HAIKU_MODEL_ID",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "YOUR_HAIKU_MODEL_ID",
+        "ENABLE_EXPERIMENTAL_MCP_CLI": "true",
+        "ENABLE_PROMPT_CACHING_1H_BEDROCK": "1",
+        "ENABLE_PROMPT_CACHING_1H": "1"
+    },
+    "permissions": {
+        "defaultMode": "auto"
+    },
+    "model": "YOUR_PREFERRED_MODEL_ID",
+    "hooks": {
+        "PreCompact": [{"matcher": "", "hooks": [{"type": "command", "command": "python3 ~/.claude/scripts/smart-compact.py"}]}],
+        "UserPromptSubmit": [{"matcher": "", "hooks": [
+            {"type": "command", "command": "python3 ~/.claude/scripts/start-work-advisor.py"},
+            {"type": "command", "command": "python3 ~/.claude/scripts/session-contract.py"}
+        ]}],
+        "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "jq -r '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"updatedInput\": (.tool_input + {\"command\": (\"rtk bash -c \" + (.tool_input.command | @sh))})}}'"  }]}],
+        "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "jq -r '.session_id' | tee ~/.claude/active-session-id"}]}],
+        "Stop": [
+            {"matcher": "", "hooks": [
+                {"type": "command", "command": "python3 ~/.claude/scripts/discernment-scorer.py", "timeout": 30},
+                {"type": "command", "command": "python3 ~/.claude/scripts/session-replay.py", "timeout": 60},
+                {"type": "command", "command": "jq -r '.session_id' | { read -r sid; [ -n \"$sid\" ] && rm -rf ~/.claude/paste-images/\"$sid\"; rm -f ~/.claude/active-session-id; } 2>/dev/null || true"}
+            ]}
+        ]
+    },
+    "alwaysThinkingEnabled": true,
+    "effortLevel": "xhigh",
+    "preferredNotifChannel": "iterm2",
+    "skipAutoPermissionPrompt": true
+}
