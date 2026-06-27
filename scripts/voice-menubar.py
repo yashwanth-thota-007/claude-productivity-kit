@@ -69,14 +69,17 @@ SETTINGS_FILE       = Path.home() / ".claude" / "voice-menubar-settings.json"
 POMO_WARN_MIN = 5
 
 SPEECH_LOCALE = "en-US"
+WAKE_WORD     = "hey claude"
+WAKE_RESTART_SECS = 45   # SFSpeechRecognizer tasks time out near 60s — restart early
 
 # Configurable defaults (overridden by SETTINGS_FILE at runtime)
-DEFAULT_SILENCE    = 1.5
+DEFAULT_SILENCE      = 1.5
 DEFAULT_POMO_PRESETS = [25, 50, 90]
-DEFAULT_OVERLAY_POS  = "top-right"   # top-right | top-left | bottom-right | bottom-left
+DEFAULT_OVERLAY_POS  = "top-right"
+DEFAULT_WAKE_WORD    = False
 
-SILENCE_OPTIONS  = [0.5, 1.0, 1.5, 2.0, 3.0]   # seconds
-OVERLAY_POSITIONS = ["top-right", "top-left", "bottom-right", "bottom-left"]
+SILENCE_OPTIONS     = [0.5, 1.0, 1.5, 2.0, 3.0]
+OVERLAY_POSITIONS   = ["top-right", "top-left", "bottom-right", "bottom-left"]
 POMO_PRESET_OPTIONS = [15, 25, 50, 90, 120]
 
 
@@ -85,6 +88,7 @@ def load_settings() -> dict:
         "silence":      DEFAULT_SILENCE,
         "pomo_presets": DEFAULT_POMO_PRESETS,
         "overlay_pos":  DEFAULT_OVERLAY_POS,
+        "wake_word":    DEFAULT_WAKE_WORD,
     }
     if SETTINGS_FILE.exists():
         try:
@@ -245,6 +249,115 @@ class LiveTranscriber:
             pass
         self._on_final(self._last_text)
         self._on_stop()
+
+class WakeWordListener:
+    """Always-on recogniser that fires on_triggered() when WAKE_WORD is heard.
+
+    Restarts itself every WAKE_RESTART_SECS to avoid SFSpeechRecognizer's ~60s
+    task timeout. Paused during active recording so the engines don't conflict.
+    """
+
+    def __init__(self, on_triggered):
+        self._on_triggered = on_triggered
+        self._stopped      = True
+        self._paused       = False
+        self._lock         = threading.Lock()
+        self._engine       = None
+        self._task         = None
+        self._request      = None
+        self._restart_timer = None
+        locale = NSLocale.alloc().initWithLocaleIdentifier_(SPEECH_LOCALE)
+        self._recognizer = SFSpeechRecognizer.alloc().initWithLocale_(locale)
+
+    def start(self):
+        with self._lock:
+            if not self._stopped:
+                return
+            self._stopped = False
+        self._run_cycle()
+
+    def stop(self):
+        with self._lock:
+            self._stopped = True
+        self._teardown()
+
+    def pause(self):
+        """Called when main recording starts — silence the wake listener."""
+        self._paused = True
+        self._teardown()
+
+    def resume(self):
+        """Called when main recording ends — restart wake listener."""
+        self._paused = False
+        with self._lock:
+            if not self._stopped:
+                self._run_cycle()
+
+    def _run_cycle(self):
+        if self._stopped or self._paused:
+            return
+        try:
+            self._engine  = AVAudioEngine.alloc().init()
+            self._request = SFSpeechAudioBufferRecognitionRequest.alloc().init()
+            self._request.setShouldReportPartialResults_(True)
+
+            def _handler(result, error):
+                if self._stopped or self._paused:
+                    return
+                if result:
+                    text = result.bestTranscription().formattedString().lower()
+                    if WAKE_WORD in text:
+                        self._teardown()
+                        self._on_triggered()
+                        return
+                if error:
+                    # Restart on error (e.g. timeout)
+                    self._teardown()
+                    threading.Timer(0.5, self._run_cycle).start()
+
+            self._task = self._recognizer.recognitionTaskWithRequest_resultHandler_(
+                self._request, _handler
+            )
+            input_node = self._engine.inputNode()
+            fmt = input_node.outputFormatForBus_(0)
+            input_node.installTapOnBus_bufferSize_format_block_(
+                0, 1024, fmt,
+                lambda buf, when: self._request.appendAudioPCMBuffer_(buf) if not self._stopped else None,
+            )
+            self._engine.prepare()
+            self._engine.startAndReturnError_(None)
+
+            # Proactive restart before 60s timeout
+            self._restart_timer = threading.Timer(WAKE_RESTART_SECS, self._restart)
+            self._restart_timer.daemon = True
+            self._restart_timer.start()
+        except Exception:
+            threading.Timer(1.0, self._run_cycle).start()
+
+    def _restart(self):
+        if self._stopped or self._paused:
+            return
+        self._teardown()
+        self._run_cycle()
+
+    def _teardown(self):
+        if self._restart_timer:
+            self._restart_timer.cancel()
+            self._restart_timer = None
+        try:
+            if self._engine:
+                self._engine.inputNode().removeTapOnBus_(0)
+                self._engine.stop()
+            if self._request:
+                self._request.endAudio()
+            if self._task:
+                self._task.cancel()
+        except Exception:
+            pass
+        self._engine  = None
+        self._request = None
+        self._task    = None
+
 
 class _MainThreadRunner(NSObject):
     """Tiny NSObject helper that runs a Python callable on the main thread.
@@ -710,6 +823,9 @@ class VoiceApp(rumps.App):
         self._silence_timer = None
         self._live_t        = None  # LiveTranscriber instance (Claude mode)
 
+        # Wake word
+        self._wake_listener = WakeWordListener(on_triggered=self._on_wake_word)
+
         # Pomodoro
         self._pomo_end       = 0.0   # epoch when timer expires
         self._pomo_title     = ""
@@ -804,6 +920,12 @@ class VoiceApp(rumps.App):
             pomo_preset_sub.add(item)
             self._pomo_preset_cfg_items[mins] = item
         settings_menu.add(pomo_preset_sub)
+        settings_menu.add(None)
+
+        # Wake word toggle
+        self._wake_item = rumps.MenuItem("  Wake word: \"Hey Claude\"", callback=self._toggle_wake_word)
+        self._wake_item.state = self._cfg["wake_word"]
+        settings_menu.add(self._wake_item)
 
         self.menu = [
             self.status_item,
@@ -823,8 +945,9 @@ class VoiceApp(rumps.App):
         threading.Thread(target=self._load_model, args=(model_name,), daemon=True).start()
         self.listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self.listener.start()
-        # Poll for auto-start signals from session-contract hook
         threading.Thread(target=self._signal_poller, daemon=True).start()
+        if self._cfg["wake_word"]:
+            self._wake_listener.start()
 
     # ── Recent transcripts ───────────────────────────────────────────────────
 
@@ -950,8 +1073,29 @@ class VoiceApp(rumps.App):
             except Exception:
                 pass
 
+    def _on_wake_word(self):
+        """Wake word detected — start Claude recording hands-free."""
+        if self.recording:
+            return
+        self._recording_for_claude = True
+        self._start_recording()
+
+    def _toggle_wake_word(self, sender):
+        enabled = not self._cfg["wake_word"]
+        self._cfg["wake_word"] = enabled
+        save_settings(self._cfg)
+        self._wake_item.state = enabled
+        if enabled:
+            self._wake_listener.start()
+            self.status_item.title = "Status: Wake word ON — say \"Hey Claude\""
+        else:
+            self._wake_listener.stop()
+            self.status_item.title = "Status: Wake word OFF"
+        threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
+
     def _start_recording(self):
-        # Capture frontmost app before focus can shift
+        # Pause wake listener so its AVAudioEngine tap doesn't conflict
+        self._wake_listener.pause()
         result = subprocess.run(
             ["osascript", "-e",
              'tell application "System Events" to name of first process whose frontmost is true'],
@@ -1033,6 +1177,7 @@ class VoiceApp(rumps.App):
         text = getattr(self, "_live_final_text", "")
         if not text.strip():
             self._reset_idle("No speech detected.")
+            self._wake_listener.resume()
             return
         append_transcript(self._log, text, "live")
         self._refresh_recent_menu()
@@ -1071,13 +1216,12 @@ class VoiceApp(rumps.App):
         self._refresh_recent_menu()
 
         if self._recording_for_claude:
-            # Live path handles this via _on_live_stopped; this branch is never
-            # reached in Claude mode — only paste mode uses Whisper now.
             self._send_to_claude(text)
         else:
             self._paste_text(text)
 
         self._reset_idle("Ready")
+        self._wake_listener.resume()
 
     def _paste_text(self, text: str):
         """Paste text into the previously focused window."""
@@ -1305,6 +1449,7 @@ class VoiceApp(rumps.App):
 
         play_sound(SOUND_STOP)
         self._reset_idle("Ready")
+        self._wake_listener.resume()
 
     # ── Pomodoro ─────────────────────────────────────────────────────────────
 
