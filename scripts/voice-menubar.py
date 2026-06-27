@@ -70,6 +70,30 @@ POMO_WARN_MIN = 5
 
 SPEECH_LOCALE = "en-US"
 WAKE_WORD     = "hey claude"
+
+_AGENT_SYSTEM_PROMPT = (
+    "You are a computer use agent on macOS with full bash access.\n\n"
+    "CALIBRATION RULE — mandatory before every click:\n"
+    "Coordinates on this display may not match what you expect. Before clicking anything, "
+    "you MUST calibrate using this loop (3-4 times until the cursor lands on the target):\n"
+    "  1. Estimate target (X, Y) from the last screenshot.\n"
+    "  2. Move cursor there (no click): "
+    "`python3 -c \"import Quartz; Quartz.CGWarpMouseCursorPosition((X, Y))\"`\n"
+    "  3. Take a screenshot WITH cursor visible (no -x flag): "
+    "`screencapture /tmp/cu_screen.png` then attach @/tmp/cu_screen.png\n"
+    "  4. Look at where the cursor arrow actually appears in the screenshot.\n"
+    "  5. If it is NOT on the target element, adjust X/Y and go back to step 2.\n"
+    "  6. Only once the cursor is confirmed on target: click with "
+    "`osascript -e 'tell application \"System Events\" to click at {X, Y}'`\n\n"
+    "OTHER RULES:\n"
+    "- NEVER construct search URLs or navigate by URL. Interact with UI as a human would.\n"
+    "- To type: click the field first (with calibration above), then "
+    "`osascript -e 'tell application \"System Events\" to keystroke \"text\"'`\n"
+    "- To press Enter: `osascript -e 'tell application \"System Events\" to key code 36'`\n"
+    "- To open an app: `open -a \"AppName\"` then screenshot to confirm.\n"
+    "- After every action, take a fresh screenshot to verify before the next step.\n\n"
+    "Start by taking a screenshot now to see the current screen.\n\nGoal: "
+)
 WAKE_RESTART_SECS = 45   # SFSpeechRecognizer tasks time out near 60s — restart early
 
 # Configurable defaults (overridden by SETTINGS_FILE at runtime)
@@ -83,6 +107,31 @@ OVERLAY_POSITIONS        = ["top-right", "top-left", "bottom-right", "bottom-lef
 POMO_PRESET_OPTIONS      = [15, 25, 50, 90, 120]
 FOCUS_GUARD_MULTIPLIER = 2       # threshold = Pomodoro duration × this
 FOCUS_BREAK_THRESHOLD  = 15 * 60  # 15 min gap resets accumulated focus
+
+CLAUDE_SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
+
+
+def _build_claude_env() -> dict:
+    """Merge settings.json env block into current os.environ so the claude subprocess
+    inherits all Bedrock routing, model config, and feature flags."""
+    import os
+    env = dict(os.environ)
+    try:
+        cfg = json.loads(CLAUDE_SETTINGS_FILE.read_text())
+        for k, v in cfg.get("env", {}).items():
+            env[k] = str(v)
+    except Exception:
+        pass
+    return env
+
+
+def _claude_model() -> str | None:
+    """Return the model from settings.json, or None to let claude use its default."""
+    try:
+        cfg = json.loads(CLAUDE_SETTINGS_FILE.read_text())
+        return cfg.get("model")
+    except Exception:
+        return None
 
 
 def load_settings() -> dict:
@@ -815,6 +864,7 @@ class VoiceApp(rumps.App):
         self._pending_screenshot = None  # @path to attach to next Claude prompt
         self._screenshot_busy    = False  # guard against chord re-firing while capture runs
         self._recording_for_claude = False
+        self._agent_mode           = False
         self.frontmost_app     = ""
         self._overlay          = VoiceOverlay(position=self._cfg["overlay_pos"])
         self._model_lock    = threading.Lock()
@@ -870,6 +920,10 @@ class VoiceApp(rumps.App):
         self.voice_session_item = rumps.MenuItem("🤖 Voice Session: none")
         voice_menu = rumps.MenuItem("Voice Claude")
         voice_menu.add(self.voice_session_item)
+        voice_menu.add(None)
+        self._agent_mode_item = rumps.MenuItem("  Computer Use Agent", callback=self._toggle_agent_mode)
+        self._agent_mode_item.state = False
+        voice_menu.add(self._agent_mode_item)
         voice_menu.add(None)
         voice_menu.add(rumps.MenuItem("  New session", callback=self._new_voice_session))
         self._refresh_voice_session_item()
@@ -1373,6 +1427,13 @@ class VoiceApp(rumps.App):
         self.status_item.title = "Status: Voice session reset"
         threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
 
+    def _toggle_agent_mode(self, sender):
+        self._agent_mode = not self._agent_mode
+        sender.state = self._agent_mode
+        label = "ON — speak a goal" if self._agent_mode else "OFF"
+        self.status_item.title = f"Status: Computer Use Agent {label}"
+        threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
+
     # ── Settings callbacks ───────────────────────────────────────────────────
 
     def _set_silence(self, sender):
@@ -1451,13 +1512,19 @@ class VoiceApp(rumps.App):
         self.status_item.title = "Status: Asking Claude..."
 
         img_prefix = self._clipboard_image_for_voice()
-        prompt = f"{img_prefix}{text}"
+        if self._agent_mode:
+            prompt = f"{_AGENT_SYSTEM_PROMPT}{text}"
+        else:
+            prompt = f"{img_prefix}{text}"
 
         cmd = [
             "/opt/homebrew/bin/claude", "--print",
             "--output-format", "stream-json", "--verbose",
             "--dangerously-skip-permissions",
         ]
+        model = _claude_model()
+        if model:
+            cmd += ["--model", model]
         if VOICE_SESSION_FILE.exists():
             sid = VOICE_SESSION_FILE.read_text().strip()
             if sid:
@@ -1468,6 +1535,7 @@ class VoiceApp(rumps.App):
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                env=_build_claude_env(),
             )
             for raw in proc.stdout:
                 raw = raw.strip()
