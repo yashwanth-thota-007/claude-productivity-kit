@@ -50,15 +50,21 @@ Session end
 **On-demand commands:**
 - `/summarize` — inline mid-session summary (What's Done / Key Decisions / Current State / Next Steps)
 - `/weekly` — roll up last 7 days of replays into a personal retro
-- `/search-sessions <query>` — search replays by keyword, date, or natural language
+- `/search-sessions <query>` — search replays by keyword, date, or natural language ("last tuesday", "auth work")
 - `/standup` — generate daily standup from replays, optionally post to Slack
+- `/health` — verify all kit dependencies, credentials, LaunchAgents, and scripts are working
 
-### 3. Slash Commands & Agents
-- **23 slash commands** in `commands/` — `/prime`, `/code-review`, `/pr-review`, `/architecture-review`, `/ultra-think`, `/auto-pr`, `/create-jira-task`, `/sprint-planning`, and more
+### 3. Ambient Awareness
+
+- **Daily brief** (`scripts/daily_brief.py`) — fires at 9am Mon–Fri via LaunchAgent; shows open PRs across all your repos + yesterday's session count + carried-over pending items in the voice overlay. Configure repos in `daily-brief-repos.json`. Monday brief includes a `/weekly` nudge.
+- **Context monitor** (`scripts/context-monitor.py`) — status line showing context window % + active Pomodoro countdown
+
+### 4. Slash Commands & Agents
+- **27 slash commands** in `commands/` — `/prime`, `/code-review`, `/pr-review`, `/architecture-review`, `/ultra-think`, `/auto-pr`, `/create-jira-task`, `/sprint-planning`, and more
 - **13 sub-agents** in `agents/` — frontend-developer, backend-architect, debugger, code-reviewer, documentation-expert, and more
 - **9 skill packs** in `skills/` — canvas-design, algorithmic-art, slack-gif-creator, pdf-processing-pro, webapp-testing, and more
 
-### 4. MCP Servers (`mcp.json`)
+### 5. MCP Servers (`mcp.json`)
 - `memory`, `fetch`, two Playwright server variants
 - Plugins: Playwright, Atlassian, Datadog, Figma, Superpowers, dx
 
@@ -87,6 +93,10 @@ bash setup.sh
 ```bash
 cp com.claude.voice-menubar.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.claude.voice-menubar.plist
+
+# Daily brief (9am Mon-Fri → voice overlay)
+cp com.claude.daily-brief.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.claude.daily-brief.plist
 
 # Optional: daily standup to Slack
 echo "SLACK_STANDUP_WEBHOOK=https://hooks.slack.com/your-webhook-url" >> ~/.claude/.env
@@ -135,18 +145,22 @@ Set in `settings.json` under `"env"`:
 │   ├── weekly.py                 Weekly retro from session replays
 │   ├── search_sessions.py        Search session replays
 │   ├── standup.py                Daily standup generator
+│   ├── daily_brief.py            Morning brief (PRs + sessions → overlay)
+│   ├── health_check.py           Dependency + config checker
 │   ├── auto-pr.py                PR description from replay + diff
 │   ├── context-monitor.py        Status line (context % + Pomodoro)
 │   └── smart-compact.py          PreCompact hook
-├── commands/           Slash commands
-├── agents/             Sub-agent definitions
-├── skills/             Skill packs
+├── commands/           Slash commands (27 total)
+├── agents/             Sub-agent definitions (13 total)
+├── skills/             Skill packs (9 total)
 ├── session-replays/    Auto-generated session summaries (gitignored)
+├── daily-brief-repos.json  Repos to scan for open PRs
 ├── settings.example.json
 ├── mcp.json
 ├── setup.sh
 ├── com.claude.voice-menubar.plist
-└── com.claude.standup.plist
+├── com.claude.standup.plist
+└── com.claude.daily-brief.plist
 ```
 
 ---
