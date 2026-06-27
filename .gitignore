@@ -9,6 +9,7 @@ pomodoro-signal.json
 pomodoro-state.json
 session-3p-seen.jsonl
 history_backups/
+session-replays/
 
 # Secrets / env
 *.env

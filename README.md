@@ -19,10 +19,12 @@ A macOS menu bar app + Claude Code hooks that turn Claude CLI into a fully-featu
 - **Smart compact** (`scripts/smart-compact.py`) — PreCompact hook
 - **History cleanup** (`scripts/cleanup_history.py`) — SessionStart hook, prunes transcripts older than 30 days
 - **Session image cleanup** — Stop hook deletes session-scoped paste-images folder on exit
+- **Session replay** (`scripts/session-replay.py`) — Stop hook generates structured markdown handoff doc at session end via Haiku, writes to `~/.claude/session-replays/`
 
 ### Slash Commands
 - `/refine` — improve a rough prompt using 6 prompting techniques
 - `/discernment-stats` — show scoring trends across sessions
+- `/auto-pr` — draft PR title + body from latest session replay + git diff, then create via `gh pr create`
 
 ## Requirements
 
@@ -63,8 +65,8 @@ alias cvimg='/opt/homebrew/bin/python3.13 ~/.claude/scripts/paste-image.py'
 
 - [ ] Voice-to-Claude (hands-free prompting)
 - [ ] Focus guard (2-hour session interrupt)
-- [ ] Session replay / handoff doc
-- [ ] Auto PR description
+- [x] Session replay / handoff doc
+- [x] Auto PR description
 - [ ] Smart screenshot (region capture → auto-inject)
 - [ ] Ambient standup (cron → Slack)
 - [ ] Team contract dashboard
