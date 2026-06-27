@@ -33,5 +33,16 @@
     "alwaysThinkingEnabled": true,
     "effortLevel": "xhigh",
     "preferredNotifChannel": "iterm2",
-    "skipAutoPermissionPrompt": true
+    "skipAutoPermissionPrompt": true,
+    "enableAllProjectMcpServers": true,
+    "enabledMcpjsonServers": [
+        "memory",
+        "executeautomation-playwright-server",
+        "fetch",
+        "automatalabs-playwright-server"
+    ],
+    "enabledPlugins": {
+        "playwright@claude-plugins-official": true,
+        "dx@ykdojo": true
+    }
 }
