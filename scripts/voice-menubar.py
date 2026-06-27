@@ -62,12 +62,39 @@ ACTIVE_SID_FILE     = Path.home() / ".claude" / "active-session-id"
 POMODORO_SIGNAL     = Path.home() / ".claude" / "pomodoro-signal.json"
 POMODORO_STATE      = Path.home() / ".claude" / "pomodoro-state.json"
 VOICE_SESSION_FILE  = Path.home() / ".claude" / "voice-session-id"
+SETTINGS_FILE       = Path.home() / ".claude" / "voice-menubar-settings.json"
 
-POMO_PRESETS  = [25, 50, 90]   # minutes shown in manual menu
-POMO_WARN_MIN = 5              # warning notification N minutes before end
+POMO_WARN_MIN = 5
 
 SPEECH_LOCALE = "en-US"
-SPEECH_SILENCE = 1.5           # seconds of no partial updates → auto-stop
+
+# Configurable defaults (overridden by SETTINGS_FILE at runtime)
+DEFAULT_SILENCE    = 1.5
+DEFAULT_POMO_PRESETS = [25, 50, 90]
+DEFAULT_OVERLAY_POS  = "top-right"   # top-right | top-left | bottom-right | bottom-left
+
+SILENCE_OPTIONS  = [0.5, 1.0, 1.5, 2.0, 3.0]   # seconds
+OVERLAY_POSITIONS = ["top-right", "top-left", "bottom-right", "bottom-left"]
+POMO_PRESET_OPTIONS = [15, 25, 50, 90, 120]
+
+
+def load_settings() -> dict:
+    defaults = {
+        "silence":      DEFAULT_SILENCE,
+        "pomo_presets": DEFAULT_POMO_PRESETS,
+        "overlay_pos":  DEFAULT_OVERLAY_POS,
+    }
+    if SETTINGS_FILE.exists():
+        try:
+            data = json.loads(SETTINGS_FILE.read_text())
+            defaults.update(data)
+        except Exception:
+            pass
+    return defaults
+
+
+def save_settings(cfg: dict):
+    SETTINGS_FILE.write_text(json.dumps(cfg, indent=2))
 
 
 def current_images_dir() -> Path:
@@ -140,10 +167,11 @@ class LiveTranscriber:
     Auto-stops after SPEECH_SILENCE seconds of silence.
     """
 
-    def __init__(self, on_partial, on_final, on_stop):
+    def __init__(self, on_partial, on_final, on_stop, silence: float = DEFAULT_SILENCE):
         self._on_partial = on_partial
         self._on_final   = on_final
-        self._on_stop    = on_stop   # called when auto/manual stop completes
+        self._on_stop    = on_stop
+        self._silence    = silence
         locale  = NSLocale.alloc().initWithLocaleIdentifier_(SPEECH_LOCALE)
         self._recognizer = SFSpeechRecognizer.alloc().initWithLocale_(locale)
         self._engine     = AVAudioEngine.alloc().init()
@@ -193,7 +221,7 @@ class LiveTranscriber:
     def _silence_watchdog(self):
         while not self._stopped:
             time.sleep(0.2)
-            if self._last_text and time.time() - self._last_ts >= SPEECH_SILENCE:
+            if self._last_text and time.time() - self._last_ts >= self._silence:
                 self._do_stop()
                 return
 
@@ -231,11 +259,12 @@ class VoiceOverlay:
     MARGIN = 16
     BTN_H  = 22
 
-    def __init__(self):
-        self._window  = None
-        self._tv      = None   # NSTextView — accumulates history
-        self._lines   = []     # list of (role, text) kept for re-render
-        self._pending = False  # True while last assistant turn is still streaming
+    def __init__(self, position: str = "top-right"):
+        self._window   = None
+        self._tv       = None
+        self._lines    = []
+        self._pending  = False
+        self._position = position
         self._build_window()
 
     def _dispatch(self, fn):
@@ -245,12 +274,33 @@ class VoiceOverlay:
             "run:", None, False
         )
 
+    def _compute_origin(self, frame):
+        pos = self._position
+        sw, sh = frame.size.width, frame.size.height
+        if pos == "top-left":
+            x, y = self.MARGIN, sh - self.H - self.MARGIN - 24
+        elif pos == "bottom-right":
+            x, y = sw - self.W - self.MARGIN, self.MARGIN
+        elif pos == "bottom-left":
+            x, y = self.MARGIN, self.MARGIN
+        else:  # top-right (default)
+            x, y = sw - self.W - self.MARGIN, sh - self.H - self.MARGIN - 24
+        return x, y
+
+    def reposition(self, position: str):
+        def _fn():
+            self._position = position
+            from AppKit import NSScreen
+            frame = NSScreen.mainScreen().frame()
+            x, y  = self._compute_origin(frame)
+            self._window.setFrameOrigin_((x, y))
+        self._dispatch(_fn)
+
     def _build_window(self):
         from AppKit import NSScreen, NSScrollView
         frame = NSScreen.mainScreen().frame()
-        x = frame.size.width  - self.W - self.MARGIN
-        y = frame.size.height - self.H - self.MARGIN - 24
-        rect = NSMakeRect(x, y, self.W, self.H)
+        x, y  = self._compute_origin(frame)
+        rect  = NSMakeRect(x, y, self.W, self.H)
 
         win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             rect, NSWindowStyleMaskBorderless, NSBackingStoreBuffered, False,
@@ -417,6 +467,8 @@ class _CloseHelper(NSObject):
 class VoiceApp(rumps.App):
     def __init__(self, model_name: str):
         super().__init__(ICON_LOADING, quit_button="Quit")
+        self._cfg = load_settings()
+
         self.model_name   = model_name
         self.model        = None
         self.recording    = False
@@ -427,9 +479,9 @@ class VoiceApp(rumps.App):
         self.last_cmd          = 0.0
         self._ctrl_held        = False
         self._cmd_held         = False
-        self._recording_for_claude = False  # True when Cmd mode, False when Ctrl mode
+        self._recording_for_claude = False
         self.frontmost_app     = ""
-        self._overlay          = VoiceOverlay()
+        self._overlay          = VoiceOverlay(position=self._cfg["overlay_pos"])
         self._model_lock    = threading.Lock()
         self._log           = load_log()
         self._vad           = webrtcvad.Vad(VAD_AGGRESSIVENESS)
@@ -476,17 +528,62 @@ class VoiceApp(rumps.App):
         voice_menu.add(rumps.MenuItem("  New session", callback=self._new_voice_session))
         self._refresh_voice_session_item()
 
-        # Pomodoro menu
+        # Pomodoro menu — pre-create one slot per possible preset value
         self.pomo_status_item = rumps.MenuItem("🍅 No timer")
         pomo_menu = rumps.MenuItem("Pomodoro")
         pomo_menu.add(self.pomo_status_item)
         pomo_menu.add(None)
-        for mins in POMO_PRESETS:
-            item = rumps.MenuItem(f"  Start {mins} min", callback=self._pomo_start_manual)
+        self._pomo_preset_slots = []
+        for mins in POMO_PRESET_OPTIONS:
+            active = mins in self._cfg["pomo_presets"]
+            item   = rumps.MenuItem(f"  Start {mins} min", callback=self._pomo_start_manual)
             item._pomo_minutes = mins
+            item._pomo_active  = active
+            item.state         = active  # checkmark = active preset
             pomo_menu.add(item)
+            self._pomo_preset_slots.append(item)
         pomo_menu.add(None)
         pomo_menu.add(rumps.MenuItem("  Stop timer", callback=self._pomo_stop_manual))
+        self._pomo_menu = pomo_menu
+
+        # Settings menu
+        settings_menu = rumps.MenuItem("Settings")
+
+        # Silence threshold
+        silence_sub = rumps.MenuItem("  Silence threshold")
+        self._silence_items = {}
+        for s in SILENCE_OPTIONS:
+            label = f"  {s}s"
+            item = rumps.MenuItem(label, callback=self._set_silence)
+            item._silence_val = s
+            item.state = (s == self._cfg["silence"])
+            silence_sub.add(item)
+            self._silence_items[s] = item
+        settings_menu.add(silence_sub)
+        settings_menu.add(None)
+
+        # Overlay position
+        pos_sub = rumps.MenuItem("  Overlay position")
+        self._pos_items = {}
+        for p in OVERLAY_POSITIONS:
+            item = rumps.MenuItem(f"  {p}", callback=self._set_overlay_pos)
+            item._pos_val = p
+            item.state = (p == self._cfg["overlay_pos"])
+            pos_sub.add(item)
+            self._pos_items[p] = item
+        settings_menu.add(pos_sub)
+        settings_menu.add(None)
+
+        # Pomodoro presets (multi-select checkmarks)
+        pomo_preset_sub = rumps.MenuItem("  Pomodoro presets")
+        self._pomo_preset_cfg_items = {}
+        for mins in POMO_PRESET_OPTIONS:
+            item = rumps.MenuItem(f"  {mins} min", callback=self._toggle_pomo_preset)
+            item._preset_mins = mins
+            item.state = (mins in self._cfg["pomo_presets"])
+            pomo_preset_sub.add(item)
+            self._pomo_preset_cfg_items[mins] = item
+        settings_menu.add(pomo_preset_sub)
 
         self.menu = [
             self.status_item,
@@ -498,6 +595,8 @@ class VoiceApp(rumps.App):
             voice_menu,
             None,
             pomo_menu,
+            None,
+            settings_menu,
             None,
         ]
 
@@ -634,6 +733,7 @@ class VoiceApp(rumps.App):
                 on_partial=self._overlay.update_partial,
                 on_final=self._on_live_final,
                 on_stop=self._on_live_stopped,
+                silence=self._cfg["silence"],
             )
             self._live_t.start()
         else:
@@ -771,6 +871,52 @@ class VoiceApp(rumps.App):
         self.status_item.title = "Status: Voice session reset"
         threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
 
+    # ── Settings callbacks ───────────────────────────────────────────────────
+
+    def _set_silence(self, sender):
+        val = sender._silence_val
+        self._cfg["silence"] = val
+        save_settings(self._cfg)
+        for s, item in self._silence_items.items():
+            item.state = (s == val)
+        self.status_item.title = f"Status: Silence → {val}s"
+        threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
+
+    def _set_overlay_pos(self, sender):
+        pos = sender._pos_val
+        self._cfg["overlay_pos"] = pos
+        save_settings(self._cfg)
+        for p, item in self._pos_items.items():
+            item.state = (p == pos)
+        self._overlay.reposition(pos)
+        self.status_item.title = f"Status: Overlay → {pos}"
+        threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
+
+    def _toggle_pomo_preset(self, sender):
+        mins    = sender._preset_mins
+        presets = list(self._cfg["pomo_presets"])
+        if mins in presets:
+            if len(presets) == 1:
+                return   # must keep at least one
+            presets.remove(mins)
+        else:
+            presets.append(mins)
+            presets.sort()
+        sender.state = (mins in presets)
+        self._cfg["pomo_presets"] = presets
+        save_settings(self._cfg)
+        self._rebuild_pomo_slots()
+
+    def _rebuild_pomo_slots(self):
+        """Sync checkmarks on Pomodoro start slots to current cfg["pomo_presets"]."""
+        presets = self._cfg["pomo_presets"]
+        for slot in self._pomo_preset_slots:
+            active            = slot._pomo_minutes in presets
+            slot._pomo_active = active
+            slot.state        = active
+
+    # ── Clipboard image ──────────────────────────────────────────────────────
+
     def _clipboard_image_for_voice(self) -> str:
         """If clipboard has an image, save it and return @path, else empty string."""
         data, fmt = self._clipboard_image()
@@ -855,6 +1001,8 @@ class VoiceApp(rumps.App):
         self._pomo_tick()
 
     def _pomo_start_manual(self, sender):
+        if not getattr(sender, "_pomo_active", True):
+            return
         self._pomo_start(sender._pomo_minutes)
 
     def _pomo_stop_manual(self, _):
