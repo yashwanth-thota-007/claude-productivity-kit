@@ -9,6 +9,23 @@
         <string>/opt/homebrew/bin/python3.13</string>
         <string>/Users/yashwanth.thota/.claude/scripts/voice-menubar.py</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/yashwanth.thota</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>AWS_PROFILE</key>
+        <string>production/developer</string>
+        <key>AWS_REGION</key>
+        <string>eu-central-1</string>
+        <key>CLAUDE_CODE_USE_BEDROCK</key>
+        <string>1</string>
+        <key>ANTHROPIC_MODEL</key>
+        <string>eu.anthropic.claude-sonnet-4-6</string>
+        <key>ANTHROPIC_SMALL_FAST_MODEL</key>
+        <string>eu.anthropic.claude-haiku-4-5-20251001-v1:0</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
