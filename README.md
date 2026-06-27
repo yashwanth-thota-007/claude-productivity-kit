@@ -47,6 +47,10 @@ launchctl load ~/Library/LaunchAgents/com.claude.voice-menubar.plist
 Grant **Accessibility** permission to `/opt/homebrew/bin/python3.13` in  
 System Settings → Privacy & Security → Accessibility.
 
+Grant **Screen Recording** permission to `/opt/homebrew/bin/python3.13` in  
+System Settings → Privacy & Security → Screen Recording.  
+(Required for the Option+Ctrl screenshot feature to capture window contents — without it screencapture returns only desktop wallpaper.)
+
 ## Shell aliases (`~/.zshrc`)
 
 ```zsh

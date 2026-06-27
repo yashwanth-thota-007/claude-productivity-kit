@@ -14,7 +14,7 @@
         <key>HOME</key>
         <string>/Users/yashwanth.thota</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin</string>
         <key>AWS_PROFILE</key>
         <string>production/developer</string>
         <key>AWS_REGION</key>

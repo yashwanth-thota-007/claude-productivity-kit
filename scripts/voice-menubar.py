@@ -51,10 +51,11 @@ ICON_CLAUDE_REC = "🤖"
 ICON_PROCESSING = "⏳"
 ICON_LOADING    = "⌛"
 
-SOUND_START  = "Ping"
-SOUND_STOP   = "Pop"
-SOUND_IMAGE  = "Glass"
-SOUND_POMO   = "Sosumi"
+SOUND_START      = "Ping"
+SOUND_STOP       = "Pop"
+SOUND_IMAGE      = "Glass"
+SOUND_POMO       = "Sosumi"
+SOUND_SCREENSHOT = "Purr"
 
 LOG_PATH            = Path.home() / ".claude" / "voice-transcripts.jsonl"
 IMAGES_BASE         = Path.home() / ".claude" / "paste-images"
@@ -255,16 +256,20 @@ class _MainThreadRunner(NSObject):
 class VoiceOverlay:
     """Persistent top-right HUD with scrollable history and a close button."""
 
-    W, H   = 380, 420
-    MARGIN = 16
-    BTN_H  = 22
+    W, H        = 380, 420
+    MARGIN      = 16
+    BTN_H       = 22
+    MINI_H      = 36   # height when minimized
 
     def __init__(self, position: str = "top-right"):
-        self._window   = None
-        self._tv       = None
-        self._lines    = []
-        self._pending  = False
-        self._position = position
+        self._window     = None
+        self._tv         = None
+        self._scroll     = None
+        self._lines      = []
+        self._pending    = False
+        self._position   = position
+        self._minimized  = False
+        self._visible    = False  # tracks whether window is currently shown
         self._build_window()
 
     def _dispatch(self, fn):
@@ -315,20 +320,26 @@ class VoiceOverlay:
 
         cv = win.contentView()
 
-        # Close button top-right
-        btn = NSButton.alloc().initWithFrame_(
+        # Button bar: [─] minimize  [✕] close  — top-right corner
+        close_btn = NSButton.alloc().initWithFrame_(
             NSMakeRect(self.W - 28, self.H - self.BTN_H - 4, 24, self.BTN_H)
         )
-        btn.setTitle_("✕")
-        btn.setBezelStyle_(0)
-        btn.setBordered_(False)
-        btn.setFont_(NSFont.systemFontOfSize_(12.0))
-        btn.setTarget_(btn)
-        # We wire the action via a tiny helper stored on self
-        self._close_btn = btn
-        cv.addSubview_(btn)
+        close_btn.setTitle_("✕")
+        close_btn.setBezelStyle_(0)
+        close_btn.setBordered_(False)
+        close_btn.setFont_(NSFont.systemFontOfSize_(12.0))
+        cv.addSubview_(close_btn)
 
-        # Scrollable text area below the button
+        mini_btn = NSButton.alloc().initWithFrame_(
+            NSMakeRect(self.W - 54, self.H - self.BTN_H - 4, 24, self.BTN_H)
+        )
+        mini_btn.setTitle_("–")
+        mini_btn.setBezelStyle_(0)
+        mini_btn.setBordered_(False)
+        mini_btn.setFont_(NSFont.systemFontOfSize_(14.0))
+        cv.addSubview_(mini_btn)
+
+        # Scrollable text area below the buttons
         scroll_rect = NSMakeRect(8, 8, self.W - 16, self.H - self.BTN_H - 16)
         scroll = NSScrollView.alloc().initWithFrame_(scroll_rect)
         scroll.setHasVerticalScroller_(True)
@@ -353,13 +364,16 @@ class VoiceOverlay:
         self._tv     = tv
         self._scroll = scroll
 
-        # Wire close button after _window is set
-        self._close_btn.setTarget_(self._close_btn)
-        self._close_btn.setAction_(None)  # handled via _CloseHelper below
+        # Wire buttons via helpers
         self._close_helper = _CloseHelper.alloc().init()
         self._close_helper._overlay = self
-        btn.setTarget_(self._close_helper)
-        btn.setAction_("close:")
+        close_btn.setTarget_(self._close_helper)
+        close_btn.setAction_("close:")
+
+        self._mini_helper = _MiniHelper.alloc().init()
+        self._mini_helper._overlay = self
+        mini_btn.setTarget_(self._mini_helper)
+        mini_btn.setAction_("minimize:")
 
     def _render(self):
         """Rebuild the full text from _lines and scroll to bottom."""
@@ -383,6 +397,7 @@ class VoiceOverlay:
         def _fn():
             self._lines.append(("user_partial", ""))
             self._render()
+            self._visible = True
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
@@ -433,12 +448,55 @@ class VoiceOverlay:
             else:
                 self._lines.append(("assistant", response))
             self._render()
+            self._visible = True
+            self._window.orderFrontRegardless()
+        self._dispatch(_fn)
+
+    def minimize(self):
+        def _fn():
+            if self._minimized:
+                return
+            self._minimized = True
+            self._scroll.setHidden_(True)
+            from AppKit import NSScreen
+            frame = NSScreen.mainScreen().frame()
+            x, y  = self._compute_origin(frame)
+            # Shrink to just the button bar height
+            self._window.setFrame_display_(
+                NSMakeRect(x, y + self.H - self.MINI_H, self.W, self.MINI_H), True
+            )
+            self._window.orderFrontRegardless()
+        self._dispatch(_fn)
+
+    def restore(self):
+        def _fn():
+            if not self._minimized:
+                return
+            self._minimized = False
+            from AppKit import NSScreen
+            frame = NSScreen.mainScreen().frame()
+            x, y  = self._compute_origin(frame)
+            self._window.setFrame_display_(
+                NSMakeRect(x, y, self.W, self.H), True
+            )
+            self._scroll.setHidden_(False)
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
     def hide(self):
         def _fn():
+            self._visible = False
             self._window.orderOut_(None)
+        self._dispatch(_fn)
+
+    def temp_hide(self):
+        def _fn():
+            self._window.orderOut_(None)
+        self._dispatch(_fn)
+
+    def temp_show(self):
+        def _fn():
+            self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
     # Legacy compat
@@ -464,6 +522,14 @@ class _CloseHelper(NSObject):
         self._overlay.hide()
 
 
+class _MiniHelper(NSObject):
+    def minimize_(self, sender):
+        if self._overlay._minimized:
+            self._overlay.restore()
+        else:
+            self._overlay.minimize()
+
+
 class VoiceApp(rumps.App):
     def __init__(self, model_name: str):
         super().__init__(ICON_LOADING, quit_button="Quit")
@@ -477,8 +543,12 @@ class VoiceApp(rumps.App):
         self.last_ctrl         = 0.0
         self.last_ctrl_v       = 0.0
         self.last_cmd          = 0.0
+        self.last_alt          = 0.0
         self._ctrl_held        = False
         self._cmd_held         = False
+        self._alt_held           = False
+        self._pending_screenshot = None  # @path to attach to next Claude prompt
+        self._screenshot_busy    = False  # guard against chord re-firing while capture runs
         self._recording_for_claude = False
         self.frontmost_app     = ""
         self._overlay          = VoiceOverlay(position=self._cfg["overlay_pos"])
@@ -660,9 +730,22 @@ class VoiceApp(rumps.App):
             self._ctrl_held = False
         elif key in (keyboard.Key.cmd_l, keyboard.Key.cmd_r):
             self._cmd_held = False
+        elif key in (keyboard.Key.alt_l, keyboard.Key.alt_r):
+            self._alt_held = False
 
     def _on_press(self, key):
         now = time.time()
+
+        # Option+Ctrl chord — guard prevents re-firing while capture is in progress
+        if not self._screenshot_busy:
+            if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r) and self._alt_held:
+                self._screenshot_busy = True
+                threading.Thread(target=self._capture_screenshot, daemon=True).start()
+                return
+            if key in (keyboard.Key.alt_l, keyboard.Key.alt_r) and self._ctrl_held:
+                self._screenshot_busy = True
+                threading.Thread(target=self._capture_screenshot, daemon=True).start()
+                return
 
         if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
             self._ctrl_held = True
@@ -694,6 +777,9 @@ class VoiceApp(rumps.App):
             if not is_double:
                 return
             threading.Thread(target=self._paste_clipboard_image, daemon=True).start()
+
+        elif key in (keyboard.Key.alt_l, keyboard.Key.alt_r):
+            self._alt_held = True
 
     # ── Recording ────────────────────────────────────────────────────────────
 
@@ -848,7 +934,7 @@ class VoiceApp(rumps.App):
         app = getattr(self, "frontmost_app", "")
         if app:
             subprocess.run(
-                ["osascript", "-e", f'tell application "{app}" to activate'],
+                ["osascript", "-e", f'tell application "System Events" to set frontmost of first process whose name is "{app}" to true'],
                 capture_output=True,
             )
             time.sleep(0.15)
@@ -857,6 +943,79 @@ class VoiceApp(rumps.App):
              'tell application "System Events" to keystroke "v" using command down'],
             capture_output=True,
         )
+
+    def _capture_screenshot(self):
+        """Double Ctrl+S — region screenshot → save to session folder → paste @path."""
+        result = subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to name of first process whose frontmost is true'],
+            capture_output=True, text=True,
+        )
+        active_app = result.stdout.strip()
+
+        # Raise the target window to front so screencapture freezes the screen with it visible.
+        # set frontmost is async — poll until confirmed or bail after 0.5s.
+        if active_app:
+            subprocess.run(
+                ["osascript", "-e",
+                 f'tell application "System Events" to set frontmost of first process whose name is "{active_app}" to true'],
+                capture_output=True,
+            )
+            deadline = time.time() + 0.5
+            while time.time() < deadline:
+                time.sleep(0.05)
+                check = subprocess.run(
+                    ["osascript", "-e",
+                     'tell application "System Events" to name of first process whose frontmost is true'],
+                    capture_output=True, text=True,
+                )
+                if check.stdout.strip() == active_app:
+                    break
+
+        out = self._next_image_path()
+        self.status_item.title = "Status: Select region…"
+
+        overlay_was_visible = self._overlay._visible
+        if overlay_was_visible:
+            self._overlay.temp_hide()
+            time.sleep(0.15)
+
+        subprocess.run(
+            ["/usr/sbin/screencapture", "-i", "-x", str(out)],
+            capture_output=True,
+        )
+
+        if overlay_was_visible:
+            self._overlay.temp_show()
+        self._screenshot_busy = False
+
+        if not out.exists() or out.stat().st_size == 0:
+            self._reset_idle("Screenshot cancelled.")
+            return
+
+        play_sound(SOUND_SCREENSHOT)
+
+        if self.recording and self._recording_for_claude:
+            self._pending_screenshot = str(out)
+            self.status_item.title = f"Status: Screenshot ready — speak your prompt"
+        else:
+            ref = f"@{out}"
+            subprocess.run(["pbcopy"], input=ref.encode(), check=True)
+            self.status_item.title = f"Status: {out.name} → pasting…"
+            time.sleep(0.3)
+            if active_app:
+                subprocess.run(
+                    ["osascript", "-e",
+                     f'tell application "System Events" to set frontmost of first process whose name is "{active_app}" to true'],
+                    capture_output=True,
+                )
+                time.sleep(0.25)
+            subprocess.run(
+                ["osascript", "-e",
+                 'tell application "System Events" to keystroke "v" using command down'],
+                capture_output=True,
+            )
+            self._reset_idle("Ready")
 
     def _refresh_voice_session_item(self):
         if VOICE_SESSION_FILE.exists():
@@ -918,7 +1077,13 @@ class VoiceApp(rumps.App):
     # ── Clipboard image ──────────────────────────────────────────────────────
 
     def _clipboard_image_for_voice(self) -> str:
-        """If clipboard has an image, save it and return @path, else empty string."""
+        """Return @path prefix for any pending screenshot or clipboard image."""
+        # Pending screenshot (Option+S taken during recording) takes priority
+        if self._pending_screenshot:
+            path = self._pending_screenshot
+            self._pending_screenshot = None
+            return f"@{path} "
+
         data, fmt = self._clipboard_image()
         if not data:
             return ""
@@ -1144,7 +1309,7 @@ class VoiceApp(rumps.App):
 
         if active_app:
             subprocess.run(
-                ["osascript", "-e", f'tell application "{active_app}" to activate'],
+                ["osascript", "-e", f'tell application "System Events" to set frontmost of first process whose name is "{active_app}" to true'],
                 capture_output=True,
             )
             time.sleep(0.15)
