@@ -63,6 +63,7 @@ IMAGES_BASE         = Path.home() / ".claude" / "paste-images"
 ACTIVE_SID_FILE     = Path.home() / ".claude" / "active-session-id"
 POMODORO_SIGNAL     = Path.home() / ".claude" / "pomodoro-signal.json"
 POMODORO_STATE      = Path.home() / ".claude" / "pomodoro-state.json"
+DAILY_BRIEF_SIGNAL  = Path.home() / ".claude" / "daily-brief-signal.json"
 VOICE_SESSION_FILE  = Path.home() / ".claude" / "voice-session-id"
 SETTINGS_FILE       = Path.home() / ".claude" / "voice-menubar-settings.json"
 
@@ -1672,31 +1673,42 @@ class VoiceApp(rumps.App):
         self._pomo_timer.start()
 
     def _signal_poller(self):
-        """Check for pomodoro-signal.json written by session-contract hook."""
+        """Check for signal files written by external scripts."""
+        self._brief_mtime = 0.0
         while True:
             time.sleep(3)
             try:
-                if not POMODORO_SIGNAL.exists():
-                    continue
-                mtime = POMODORO_SIGNAL.stat().st_mtime
-                if mtime <= self._signal_mtime:
-                    continue
-                self._signal_mtime = mtime
-                signal     = json.loads(POMODORO_SIGNAL.read_text())
-                minutes    = int(signal.get("minutes", 50))
-                title      = signal.get("title", "")
-                session_id = signal.get("session_id", "")
+                # Pomodoro signal
+                if POMODORO_SIGNAL.exists():
+                    mtime = POMODORO_SIGNAL.stat().st_mtime
+                    if mtime > self._signal_mtime:
+                        self._signal_mtime = mtime
+                        signal     = json.loads(POMODORO_SIGNAL.read_text())
+                        minutes    = int(signal.get("minutes", 50))
+                        title      = signal.get("title", "")
+                        session_id = signal.get("session_id", "")
+                        if session_id and session_id != self._focus_session_id:
+                            self._focus_session_id  = session_id
+                            self._focus_accumulated = 0.0
+                            self._focus_threshold   = minutes * FOCUS_GUARD_MULTIPLIER
+                            self._focus_fired       = False
+                            self._focus_status_item.title = f"🧠 Focus: 0 min / {self._focus_threshold} min"
+                        self._refresh_session_slots()
+                        self._pomo_start(minutes, title)
+            except Exception:
+                pass
 
-                # New session → reset focus guard for this session's timebox
-                if session_id and session_id != self._focus_session_id:
-                    self._focus_session_id  = session_id
-                    self._focus_accumulated = 0.0
-                    self._focus_threshold   = minutes * FOCUS_GUARD_MULTIPLIER
-                    self._focus_fired       = False
-                    self._focus_status_item.title = f"🧠 Focus: 0 min / {self._focus_threshold} min"
-
-                self._refresh_session_slots()
-                self._pomo_start(minutes, title)
+            try:
+                # Daily brief signal
+                if DAILY_BRIEF_SIGNAL.exists():
+                    mtime = DAILY_BRIEF_SIGNAL.stat().st_mtime
+                    if mtime > self._brief_mtime:
+                        self._brief_mtime = mtime
+                        signal = json.loads(DAILY_BRIEF_SIGNAL.read_text())
+                        content = signal.get("content", "")
+                        if content:
+                            play_sound(SOUND_START)
+                            self._overlay.show(content)
             except Exception:
                 pass
 
