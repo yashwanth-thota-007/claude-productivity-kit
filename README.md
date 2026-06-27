@@ -25,6 +25,7 @@ A macOS menu bar app + Claude Code hooks that turn Claude CLI into a fully-featu
 - `/refine` — improve a rough prompt using 6 prompting techniques
 - `/discernment-stats` — show scoring trends across sessions
 - `/auto-pr` — draft PR title + body from latest session replay + git diff, then create via `gh pr create`
+- `/standup` — generate daily standup from recent session replays, optionally post to Slack
 
 ## Requirements
 
@@ -44,6 +45,11 @@ A macOS menu bar app + Claude Code hooks that turn Claude CLI into a fully-featu
 # LaunchAgent (auto-start on login)
 cp com.claude.voice-menubar.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.claude.voice-menubar.plist
+
+# Standup cron (9am Mon-Fri → Slack)
+echo "SLACK_STANDUP_WEBHOOK=https://hooks.slack.com/your-webhook-url" >> ~/.claude/.env
+cp com.claude.standup.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.claude.standup.plist
 ```
 
 Grant **Accessibility** permission to `/opt/homebrew/bin/python3.13` in  
@@ -68,5 +74,5 @@ alias cvimg='/opt/homebrew/bin/python3.13 ~/.claude/scripts/paste-image.py'
 - [x] Session replay / handoff doc
 - [x] Auto PR description
 - [ ] Smart screenshot (region capture → auto-inject)
-- [ ] Ambient standup (cron → Slack)
+- [x] Ambient standup (cron → Slack)
 - [ ] Team contract dashboard
