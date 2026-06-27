@@ -26,6 +26,7 @@ from AppKit import (
     NSWindowStyleMaskBorderless, NSBackingStoreBuffered,
     NSFloatingWindowLevel,
 )
+from WebKit import WKWebView, WKWebViewConfiguration
 from Foundation import NSLocale
 from Speech import (
     SFSpeechRecognizer,
@@ -253,23 +254,186 @@ class _MainThreadRunner(NSObject):
         self._fn()
 
 
-class VoiceOverlay:
-    """Persistent top-right HUD with scrollable history and a close button."""
+_OVERLAY_CSS = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    background: #141416;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    font-size: 13px;
+    color: #e8e8e8;
+    padding: 8px 10px 16px;
+    overflow-x: hidden;
+}
+.bubble { margin-bottom: 10px; display: flex; flex-direction: column; }
+.bubble.user  { align-items: flex-end; }
+.bubble.assistant, .bubble.status { align-items: flex-start; }
+.label {
+    font-size: 10px;
+    color: #888;
+    margin-bottom: 3px;
+    padding: 0 4px;
+}
+.body {
+    max-width: 92%;
+    padding: 7px 10px;
+    border-radius: 12px;
+    line-height: 1.5;
+    word-break: break-word;
+}
+.bubble.user .body {
+    background: #1a4a7a;
+    border-bottom-right-radius: 3px;
+}
+.bubble.assistant .body {
+    background: #2a2a2e;
+    border-bottom-left-radius: 3px;
+}
+.bubble.status .body {
+    background: transparent;
+    color: #888;
+    font-style: italic;
+    font-size: 12px;
+    padding: 4px 6px;
+}
+.bubble.partial .body { opacity: 0.6; }
+/* Markdown elements */
+p  { margin: 0 0 6px; }
+p:last-child { margin-bottom: 0; }
+code {
+    background: #1e1e22;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: #e06c75;
+}
+pre {
+    background: #1e1e22;
+    border-radius: 8px;
+    padding: 10px;
+    overflow-x: auto;
+    margin: 6px 0;
+}
+pre code {
+    background: none;
+    padding: 0;
+    color: #abb2bf;
+    font-size: 12px;
+    line-height: 1.5;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 6px 0;
+    font-size: 12px;
+}
+th, td {
+    border: 1px solid #444;
+    padding: 5px 8px;
+    text-align: left;
+}
+th { background: #333; color: #ccc; }
+tr:nth-child(even) td { background: #252528; }
+blockquote {
+    border-left: 3px solid #555;
+    padding-left: 10px;
+    color: #aaa;
+    margin: 4px 0;
+}
+ul, ol { padding-left: 18px; margin: 4px 0; }
+li { margin-bottom: 2px; }
+strong { color: #fff; }
+em { color: #bbb; }
+a { color: #5bb3f5; text-decoration: none; }
+img.thumb {
+    max-width: 100%;
+    max-height: 160px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    display: block;
+}
+h1,h2,h3 { color: #fff; margin: 8px 0 4px; }
+h1 { font-size: 15px; }
+h2 { font-size: 14px; }
+h3 { font-size: 13px; }
+"""
 
-    W, H        = 380, 420
+_OVERLAY_HTML_SHELL = """<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<style>{css}</style>
+</head><body id="body"></body></html>"""
+
+_OVERLAY_JS_APPEND = """
+(function() {{
+    var body = document.getElementById('body');
+    var div = document.createElement('div');
+    div.innerHTML = {html_json};
+    body.appendChild(div);
+    window.scrollTo(0, document.body.scrollHeight);
+}})();
+"""
+
+_OVERLAY_JS_UPDATE_LAST = """
+(function() {{
+    var body = document.getElementById('body');
+    var divs = body.children;
+    if (divs.length > 0) {{
+        divs[divs.length - 1].innerHTML = {html_json};
+    }} else {{
+        var div = document.createElement('div');
+        div.innerHTML = {html_json};
+        body.appendChild(div);
+    }}
+    window.scrollTo(0, document.body.scrollHeight);
+}})();
+"""
+
+
+def _md_to_html(text: str) -> str:
+    import mistune
+    return mistune.html(text)
+
+
+def _bubble_html(role: str, text: str, img_path: str = "") -> str:
+    extra_class = ""
+    if role == "user_partial":
+        label = "🎙"
+        extra_class = "user partial"
+        body = f"<em>{text or '…'}</em>"
+    elif role == "user":
+        label = "🎙"
+        extra_class = "user"
+        img_tag = f'<img class="thumb" src="file://{img_path}">' if img_path else ""
+        body = img_tag + (f"<p>{text}</p>" if text else "")
+    elif role == "status":
+        label = ""
+        extra_class = "status"
+        body = f"<p>{text}</p>"
+    else:  # assistant
+        label = "Claude"
+        extra_class = "assistant"
+        body = _md_to_html(text) if text else "<em>…</em>"
+
+    label_html = f'<div class="label">{label}</div>' if label else ""
+    return f'<div class="bubble {extra_class}">{label_html}<div class="body">{body}</div></div>'
+
+
+class VoiceOverlay:
+    """Persistent HUD backed by WKWebView — renders markdown, tables, images."""
+
+    W, H        = 400, 480
     MARGIN      = 16
     BTN_H       = 22
-    MINI_H      = 36   # height when minimized
+    MINI_H      = 36
 
     def __init__(self, position: str = "top-right"):
-        self._window     = None
-        self._tv         = None
-        self._scroll     = None
-        self._lines      = []
-        self._pending    = False
-        self._position   = position
-        self._minimized  = False
-        self._visible    = False  # tracks whether window is currently shown
+        self._window    = None
+        self._wv        = None
+        self._lines     = []   # list of (role, text, img_path)
+        self._position  = position
+        self._minimized = False
+        self._visible   = False
         self._build_window()
 
     def _dispatch(self, fn):
@@ -288,7 +452,7 @@ class VoiceOverlay:
             x, y = sw - self.W - self.MARGIN, self.MARGIN
         elif pos == "bottom-left":
             x, y = self.MARGIN, self.MARGIN
-        else:  # top-right (default)
+        else:
             x, y = sw - self.W - self.MARGIN, sh - self.H - self.MARGIN - 24
         return x, y
 
@@ -302,7 +466,7 @@ class VoiceOverlay:
         self._dispatch(_fn)
 
     def _build_window(self):
-        from AppKit import NSScreen, NSScrollView
+        from AppKit import NSScreen
         frame = NSScreen.mainScreen().frame()
         x, y  = self._compute_origin(frame)
         rect  = NSMakeRect(x, y, self.W, self.H)
@@ -312,15 +476,15 @@ class VoiceOverlay:
         )
         win.setLevel_(NSFloatingWindowLevel + 1)
         win.setOpaque_(False)
-        win.setAlphaValue_(0.93)
-        win.setIgnoresMouseEvents_(False)   # allow close button clicks
+        win.setAlphaValue_(0.95)
+        win.setIgnoresMouseEvents_(False)
         win.setBackgroundColor_(
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08, 0.08, 0.08, 0.92)
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.10, 0.10, 0.12, 0.95)
         )
 
         cv = win.contentView()
 
-        # Button bar: [─] minimize  [✕] close  — top-right corner
+        # Close button
         close_btn = NSButton.alloc().initWithFrame_(
             NSMakeRect(self.W - 28, self.H - self.BTN_H - 4, 24, self.BTN_H)
         )
@@ -330,6 +494,7 @@ class VoiceOverlay:
         close_btn.setFont_(NSFont.systemFontOfSize_(12.0))
         cv.addSubview_(close_btn)
 
+        # Minimize button
         mini_btn = NSButton.alloc().initWithFrame_(
             NSMakeRect(self.W - 54, self.H - self.BTN_H - 4, 24, self.BTN_H)
         )
@@ -339,32 +504,24 @@ class VoiceOverlay:
         mini_btn.setFont_(NSFont.systemFontOfSize_(14.0))
         cv.addSubview_(mini_btn)
 
-        # Scrollable text area below the buttons
-        scroll_rect = NSMakeRect(8, 8, self.W - 16, self.H - self.BTN_H - 16)
-        scroll = NSScrollView.alloc().initWithFrame_(scroll_rect)
-        scroll.setHasVerticalScroller_(True)
-        scroll.setAutohidesScrollers_(True)
-        scroll.setBorderType_(0)
-        scroll.setDrawsBackground_(False)
-
-        tv = NSTextView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, self.W - 16, self.H - self.BTN_H - 16)
-        )
-        tv.setEditable_(False)
-        tv.setSelectable_(True)
-        tv.setDrawsBackground_(False)
-        tv.setFont_(NSFont.systemFontOfSize_(12.0))
-        tv.setTextColor_(NSColor.whiteColor())
-        tv.textContainer().setWidthTracksTextView_(True)
-        tv.setVerticallyResizable_(True)
-        scroll.setDocumentView_(tv)
-        cv.addSubview_(scroll)
+        # WKWebView fills area below buttons
+        wv_rect = NSMakeRect(0, 0, self.W, self.H - self.BTN_H - 8)
+        cfg = WKWebViewConfiguration.alloc().init()
+        wv = WKWebView.alloc().initWithFrame_configuration_(wv_rect, cfg)
+        # Disable WKWebView's own background so the NSWindow dark bg shows through
+        wv.setValue_forKey_(False, "drawsBackground")
+        cv.addSubview_(wv)
 
         self._window = win
-        self._tv     = tv
-        self._scroll = scroll
+        self._wv     = wv
 
-        # Wire buttons via helpers
+        # base URL allows file:// image paths to load
+        from Foundation import NSURL
+        base_url = NSURL.fileURLWithPath_("/")
+        shell = _OVERLAY_HTML_SHELL.format(css=_OVERLAY_CSS)
+        wv.loadHTMLString_baseURL_(shell, base_url)
+
+        # Wire buttons
         self._close_helper = _CloseHelper.alloc().init()
         self._close_helper._overlay = self
         close_btn.setTarget_(self._close_helper)
@@ -375,79 +532,73 @@ class VoiceOverlay:
         mini_btn.setTarget_(self._mini_helper)
         mini_btn.setAction_("minimize:")
 
-    def _render(self):
-        """Rebuild the full text from _lines and scroll to bottom."""
-        parts = []
-        for role, text in self._lines:
-            if role == "user_partial":
-                parts.append(f"🎙… {text}")
-            elif role == "user":
-                parts.append(f"🎙 {text}")
-            elif role == "status":
-                parts.append(f"⏳ {text}")
-            else:
-                parts.append(f"💬 {text}" if text else "💬 …")
-        self._tv.setString_("\n\n".join(parts))
-        # Scroll to bottom
-        self._tv.scrollRangeToVisible_(
-            (len(self._tv.string()), 0)
-        )
+    def _js_append(self, role: str, text: str, img_path: str = ""):
+        html = _bubble_html(role, text, img_path)
+        js   = _OVERLAY_JS_APPEND.format(html_json=json.dumps(html))
+        self._wv.evaluateJavaScript_completionHandler_(js, None)
+
+    def _js_update_last(self, role: str, text: str, img_path: str = ""):
+        html = _bubble_html(role, text, img_path)
+        js   = _OVERLAY_JS_UPDATE_LAST.format(html_json=json.dumps(html))
+        self._wv.evaluateJavaScript_completionHandler_(js, None)
 
     def show_listening(self):
         def _fn():
-            self._lines.append(("user_partial", ""))
-            self._render()
+            self._lines.append(("user_partial", "", ""))
+            self._js_append("user_partial", "")
             self._visible = True
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
     def update_partial(self, text: str):
-        """Live transcription partial — update the last user_partial line."""
         def _fn():
             if self._lines and self._lines[-1][0] == "user_partial":
-                self._lines[-1] = ("user_partial", text)
-                self._render()
+                self._lines[-1] = ("user_partial", text, "")
+                self._js_update_last("user_partial", text)
         self._dispatch(_fn)
 
-    def finalize_user(self, text: str):
-        """Recording stopped — promote partial to confirmed user turn."""
+    def finalize_user(self, text: str, img_path: str = ""):
         def _fn():
             if self._lines and self._lines[-1][0] == "user_partial":
-                self._lines[-1] = ("user", text)
+                self._lines[-1] = ("user", text, img_path)
+                self._js_update_last("user", text, img_path)
             else:
-                self._lines.append(("user", text))
-            self._lines.append(("assistant", ""))   # placeholder for streaming
-            self._render()
+                self._lines.append(("user", text, img_path))
+                self._js_append("user", text, img_path)
+            self._lines.append(("assistant", "", ""))
+            self._js_append("assistant", "")
         self._dispatch(_fn)
 
     def stream_chunk(self, text: str):
-        """Append/replace the last assistant line with accumulating streamed text."""
         def _fn():
             if self._lines and self._lines[-1][0] == "assistant":
-                self._lines[-1] = ("assistant", text)
+                self._lines[-1] = ("assistant", text, "")
+                self._js_update_last("assistant", text)
             else:
-                self._lines.append(("assistant", text))
-            self._render()
+                self._lines.append(("assistant", text, ""))
+                self._js_append("assistant", text)
         self._dispatch(_fn)
 
     def show_transcribing(self, text: str):
-        """Fallback for non-live path."""
         def _fn():
             if self._lines and self._lines[-1][0] in ("user_partial", "status"):
-                self._lines[-1] = ("user", text)
+                self._lines[-1] = ("user", text, "")
+                self._js_update_last("user", text)
             else:
-                self._lines.append(("user", text))
-            self._lines.append(("assistant", ""))
-            self._render()
+                self._lines.append(("user", text, ""))
+                self._js_append("user", text)
+            self._lines.append(("assistant", "", ""))
+            self._js_append("assistant", "")
         self._dispatch(_fn)
 
     def show_response(self, response: str):
         def _fn():
             if self._lines and self._lines[-1][0] in ("assistant", "status"):
-                self._lines[-1] = ("assistant", response)
+                self._lines[-1] = ("assistant", response, "")
+                self._js_update_last("assistant", response)
             else:
-                self._lines.append(("assistant", response))
-            self._render()
+                self._lines.append(("assistant", response, ""))
+                self._js_append("assistant", response)
             self._visible = True
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
@@ -457,11 +608,10 @@ class VoiceOverlay:
             if self._minimized:
                 return
             self._minimized = True
-            self._scroll.setHidden_(True)
+            self._wv.setHidden_(True)
             from AppKit import NSScreen
             frame = NSScreen.mainScreen().frame()
             x, y  = self._compute_origin(frame)
-            # Shrink to just the button bar height
             self._window.setFrame_display_(
                 NSMakeRect(x, y + self.H - self.MINI_H, self.W, self.MINI_H), True
             )
@@ -479,7 +629,7 @@ class VoiceOverlay:
             self._window.setFrame_display_(
                 NSMakeRect(x, y, self.W, self.H), True
             )
-            self._scroll.setHidden_(False)
+            self._wv.setHidden_(False)
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
@@ -499,21 +649,21 @@ class VoiceOverlay:
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
-    # Legacy compat
     def show(self, text: str, auto_hide: bool = False):
         def _fn():
-            self._lines.append(("assistant", text))
-            self._render()
+            self._lines.append(("assistant", text, ""))
+            self._js_append("assistant", text)
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
     def update(self, text: str):
         def _fn():
             if self._lines and self._lines[-1][0] in ("status", "user_partial"):
-                self._lines[-1] = ("status", text)
+                self._lines[-1] = ("status", text, "")
+                self._js_update_last("status", text)
             else:
-                self._lines.append(("status", text))
-            self._render()
+                self._lines.append(("status", text, ""))
+                self._js_append("status", text)
         self._dispatch(_fn)
 
 
@@ -872,7 +1022,8 @@ class VoiceApp(rumps.App):
     def _on_live_final(self, text: str):
         """SFSpeechRecognizer delivered final text."""
         self._live_final_text = text
-        self._overlay.finalize_user(text)
+        img_path = self._pending_screenshot or ""
+        self._overlay.finalize_user(text, img_path=img_path)
         self.title = ICON_PROCESSING
         self.status_item.title = "Status: Asking Claude..."
 
