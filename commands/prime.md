@@ -39,7 +39,35 @@ Initialize a new Claude Code session with comprehensive project context:
    - Note any pre-commit hooks or git hooks
    - Identify deployment processes and environments
 
-5. **Save Results and Output Summary**
+5. **Load Session Continuity Context**
+
+   Pull in context from previous sessions before writing the summary:
+
+   ```bash
+   git log --oneline -5 2>/dev/null || true
+   ```
+
+   Also run:
+   ```bash
+   python3 -c "
+   import re, os
+   from pathlib import Path
+   replays_dir = Path.home() / '.claude' / 'session-replays'
+   if replays_dir.exists():
+       files = list(replays_dir.glob('*.md'))
+       if files:
+           latest = max(files, key=lambda f: f.stat().st_mtime)
+           text = latest.read_text()
+           for section in ['## Pending / Next Steps', '## Resume Context']:
+               m = re.search(section + r'\n(.+?)(?:\n##|\Z)', text, re.DOTALL)
+               if m:
+                   print(section + '\n' + m.group(1).strip() + '\n')
+   " 2>/dev/null || true
+   ```
+
+   Incorporate any pending items and resume context into the prime summary so the session starts with full continuity.
+
+6. **Save Results and Output Summary**
    - **CRITICAL: Create or update `.claude/prime-results.md` in the project root** with all findings
    - Use the Write tool to save a comprehensive markdown document including:
      - Project Overview: purpose, goals, and description (2-3 sentences)
@@ -52,8 +80,9 @@ Initialize a new Claude Code session with comprehensive project context:
      - Configuration: environment setup, package manager, special requirements
      - Documentation: locations of key docs, API specs, architecture diagrams
      - Code Ownership: CODEOWNERS file location and ownership patterns
+     - Pending From Last Session: any open items from the last replay
      - Last Updated: timestamp of when prime was run
-   - After saving, provide a brief summary to the user of key findings
+   - After saving, provide a brief summary of key findings including any open items from the last session
 
 This command helps establish context quickly when:
 - Starting work on a new project

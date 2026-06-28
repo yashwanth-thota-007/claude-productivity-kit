@@ -1835,6 +1835,23 @@ location.href='file://{art_html}';
             except Exception:
                 pass
 
+            try:
+                # Session-end summary signal (written by session-replay.py Stop hook)
+                session_end_signal = Path.home() / ".claude" / "session-end-signal.json"
+                if session_end_signal.exists():
+                    mtime = session_end_signal.stat().st_mtime
+                    if not hasattr(self, '_session_end_mtime'):
+                        self._session_end_mtime = 0.0
+                    if mtime > self._session_end_mtime:
+                        self._session_end_mtime = mtime
+                        signal = json.loads(session_end_signal.read_text())
+                        content = signal.get("content", "")
+                        if content and signal.get("type") == "session_end":
+                            play_sound(SOUND_STOP)
+                            self._overlay.show(f"**Session complete**\n\n{content}")
+            except Exception:
+                pass
+
     # ── Clipboard image paste ────────────────────────────────────────────────
 
     def _next_image_path(self) -> Path:

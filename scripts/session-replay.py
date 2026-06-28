@@ -271,6 +271,33 @@ def main():
     _run_bg(["python3", str(SCRIPTS_DIR / "index_session.py"), str(fname)])
     _run_bg(["python3", str(SCRIPTS_DIR / "project_mental_model.py"), "--update", str(fname), cwd])
 
+    # Write a signal file so the voice-menubar overlay shows a session summary
+    import re
+    goal_match = re.search(r"## Goal\n(.+?)(?:\n\n|\n##)", doc, re.DOTALL)
+    goal = goal_match.group(1).strip()[:120] if goal_match else title
+    pending_match = re.search(r"## Pending.*?\n(.+?)(?:\n##|\Z)", doc, re.DOTALL)
+    pending_lines = pending_match.group(1).strip().splitlines() if pending_match else []
+    # Pull discernment avg from metrics block
+    disc_match = re.search(r"Discernment avg: (.+?)(?:\n|$)", doc)
+    disc = disc_match.group(1).strip() if disc_match else ""
+    summary_lines = [f"✅ {goal}"]
+    if disc:
+        summary_lines.append(f"Quality: {disc}")
+    if pending_lines:
+        summary_lines.append("Next:")
+        for l in pending_lines[:3]:
+            clean = l.lstrip("- •").strip()
+            if clean and clean.lower() not in ("none", "none — session goal fully achieved."):
+                summary_lines.append(f"  • {clean[:80]}")
+    signal = {
+        "content": "\n".join(summary_lines),
+        "session_id": session_id,
+        "ts": time.time(),
+        "type": "session_end",
+    }
+    signal_path = Path.home() / ".claude" / "session-end-signal.json"
+    signal_path.write_text(json.dumps(signal))
+
     # Surface the file path to the user via systemMessage
     print(json.dumps({"systemMessage": f"📝 Session replay saved: {fname.name}"}))
 
