@@ -5,9 +5,11 @@ Stop hook — generates a session replay/handoff doc.
 Reads the session transcript + contract, uses Haiku to produce a structured
 markdown summary, writes it to ~/.claude/session-replays/<session_id>.md.
 """
-import json, os, sys, time, boto3
+import json, os, sys, time, subprocess, boto3
 from pathlib import Path
 from datetime import datetime
+
+SCRIPTS_DIR = Path(__file__).parent
 
 CONTRACTS_DIR  = Path.home() / ".claude" / "session-contracts"
 REPLAYS_DIR    = Path.home() / ".claude" / "session-replays"
@@ -135,6 +137,13 @@ def generate_summary(contract: str, transcript: str) -> str:
     return json.loads(resp["body"].read())["content"][0]["text"].strip()
 
 
+def _run_bg(cmd: list):
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -176,6 +185,11 @@ def main():
 
     doc = f"# {title}\n\n**Session:** `{session_id[:8]}`  \n**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n{summary}\n"
     fname.write_text(doc)
+
+    # Index into personal sessions.db + inject Obsidian wikilinks
+    cwd = hook_input.get("cwd", str(Path.home()))
+    _run_bg(["python3", str(SCRIPTS_DIR / "index_session.py"), str(fname)])
+    _run_bg(["python3", str(SCRIPTS_DIR / "project_mental_model.py"), "--update", str(fname), cwd])
 
     # Surface the file path to the user via systemMessage
     print(json.dumps({"systemMessage": f"📝 Session replay saved: {fname.name}"}))

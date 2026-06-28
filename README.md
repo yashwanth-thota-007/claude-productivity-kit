@@ -50,11 +50,30 @@ Session end
 **On-demand commands:**
 - `/summarize` — inline mid-session summary (What's Done / Key Decisions / Current State / Next Steps)
 - `/weekly` — roll up last 7 days of replays into a personal retro
-- `/search-sessions <query>` — search replays by keyword, date, or natural language ("last tuesday", "auth work")
+- `/search-sessions <query>` — search replays by keyword (FTS5), date, or semantic vector search (local, no API)
 - `/standup` — generate daily standup from replays, optionally post to Slack
 - `/health` — verify all kit dependencies, credentials, LaunchAgents, and scripts are working
 
-### 3. Ambient Awareness
+### 3. Context Map & Project Mental Model
+
+Every session is embedded locally using `all-MiniLM-L6-v2` (CPU-only, ~80MB) and stored in a `pyturso` SQLite database with FTS5 + vector search.
+
+**Personal knowledge graph** (`~/.claude/sessions.db`):
+- Session replays indexed with full-text + 384-dim vector embeddings
+- Related sessions auto-linked as Obsidian `[[wikilinks]]` (sim ≥ 0.75)
+- Open `~/.claude/session-replays/` as an Obsidian vault → graph view shows sessions as nodes, wikilinks as edges
+
+**Project mental model** (`<project-root>/.claude/mental-model.db`):
+- Auto-updated at session end with what changed in this project
+- Auto-queried at session start — top-5 relevant past sessions injected into system context
+- Per-project, gitignored, built up over sessions
+
+```bash
+# Backfill all existing session replays (run once after install)
+python3 ~/.claude/scripts/backfill_sessions.py
+```
+
+### 4. Ambient Awareness
 
 - **Daily brief** (`scripts/daily_brief.py`) — fires at 9am Mon–Fri via LaunchAgent; shows open PRs across all your repos + yesterday's session count + carried-over pending items in the voice overlay. Configure repos in `daily-brief-repos.json`. Monday brief includes a `/weekly` nudge.
 - **Context monitor** (`scripts/context-monitor.py`) — status line showing context window % + active Pomodoro countdown
@@ -86,7 +105,7 @@ bash setup.sh
 /opt/homebrew/bin/pip3.13 install \
   openai-whisper sounddevice numpy pyperclip rumps pynput mistune \
   pyobjc-framework-Cocoa pyobjc-framework-Quartz \
-  webrtcvad boto3 --break-system-packages
+  webrtcvad boto3 pyturso sentence-transformers --break-system-packages
 ```
 
 ### 3. LaunchAgents
@@ -144,13 +163,18 @@ Set in `settings.json` under `"env"`:
 │   ├── session-replay.py         End-of-session handoff doc (Stop hook)
 │   ├── summarize.py              On-demand mid-session summary
 │   ├── weekly.py                 Weekly retro from session replays
-│   ├── search_sessions.py        Search session replays
+│   ├── search_sessions.py        Search replays (FTS5 + local vector, no API)
 │   ├── standup.py                Daily standup generator
 │   ├── daily_brief.py            Morning brief (PRs + sessions → overlay)
 │   ├── health_check.py           Dependency + config checker
 │   ├── auto-pr.py                PR description from replay + diff
 │   ├── context-monitor.py        Status line (context % + Pomodoro)
-│   └── smart-compact.py          PreCompact hook
+│   ├── smart-compact.py          PreCompact hook
+│   ├── db.py                     Shared pyturso schema (sessions.db + mental-model.db)
+│   ├── embed.py                  Lazy all-MiniLM-L6-v2 wrapper (384-dim, CPU)
+│   ├── index_session.py          Embed replay → sessions.db → inject [[wikilinks]]
+│   ├── project_mental_model.py   Per-project knowledge base (--update / --query)
+│   └── backfill_sessions.py      One-time index of existing session replays
 ├── commands/           Slash commands (27 total)
 ├── agents/             Sub-agent definitions (13 total)
 ├── skills/             Skill packs (9 total)

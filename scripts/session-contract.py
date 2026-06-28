@@ -13,9 +13,11 @@ Every subsequent message:
     from the original domain, injects a warning asking Claude to flag it inline
     and suggest starting a fresh session
 """
-import json, os, sys, time, boto3
+import json, os, sys, time, subprocess, boto3
 from pathlib import Path
 from typing import Optional
+
+SCRIPTS_DIR = Path(__file__).parent
 
 CONTRACTS_DIR    = Path.home() / ".claude" / "session-contracts"
 POMODORO_SIGNAL  = Path.home() / ".claude" / "pomodoro-signal.json"
@@ -145,6 +147,20 @@ def format_drift_warning(c: dict) -> str:
     )
 
 
+def get_mental_model_context(prompt: str, cwd: str) -> str:
+    try:
+        result = subprocess.run(
+            ["python3", str(SCRIPTS_DIR / "project_mental_model.py"), "--query", prompt[:500], cwd],
+            capture_output=True, text=True, timeout=8,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout.strip())
+            return data.get("additionalSystemPrompt", "")
+    except Exception:
+        pass
+    return ""
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -188,6 +204,10 @@ def main():
         }))
 
         context = format_contract_context(contract)
+        cwd = hook_input.get("cwd", str(Path.home()))
+        mm = get_mental_model_context(prompt, cwd)
+        if mm:
+            context = f"{context}\n\n{mm}"
         print(json.dumps({"additionalSystemPrompt": context}))
         return
 
@@ -200,15 +220,19 @@ def main():
     is_new_task = is_task_intent(prompt_low)
     drift       = drift_score(prompt_low, keywords)
 
-    # Only flag drift on explicit new-task prompts with high keyword divergence
+    cwd = hook_input.get("cwd", str(Path.home()))
+    mm = get_mental_model_context(prompt, cwd)
+
     if is_new_task and drift >= 0.85 and len(keywords) >= 3:
         warning = format_drift_warning(existing)
         contract_ctx = format_contract_context(existing)
-        print(json.dumps({"additionalSystemPrompt": f"{contract_ctx}\n\n{warning}"}))
+        full = f"{contract_ctx}\n\n{warning}"
     else:
-        # Light reminder — keeps Claude anchored without being noisy
-        ctx = format_contract_context(existing)
-        print(json.dumps({"additionalSystemPrompt": ctx}))
+        full = format_contract_context(existing)
+
+    if mm:
+        full = f"{full}\n\n{mm}"
+    print(json.dumps({"additionalSystemPrompt": full}))
 
 
 if __name__ == "__main__":

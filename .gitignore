@@ -7,9 +7,14 @@ discernment-log.jsonl
 active-session-id
 pomodoro-signal.json
 pomodoro-state.json
+daily-brief-signal.json
 session-3p-seen.jsonl
 history_backups/
 session-replays/
+
+# Vector/FTS databases — built locally, not tracked
+sessions.db
+memory/
 
 # Secrets / env
 *.env
