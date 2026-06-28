@@ -184,9 +184,12 @@
         <div class="section-title">Actions</div>
         <div class="btn-row" style="margin-bottom:6px">
           <button class="btn btn-orange" onclick="startRender()">▶ Render</button>
-          <button class="btn btn-dark" id="btn-save" onclick="downloadCanvas()" disabled>⬇ Save</button>
+          <button class="btn btn-dark" id="btn-save" onclick="downloadCanvas()" disabled>⬇ Save PNG</button>
         </div>
-        <button class="btn btn-blue" onclick="resetParameters()">Reset Defaults</button>
+        <div class="btn-row" style="margin-bottom:6px">
+          <button class="btn btn-blue" id="btn-save-recipe" onclick="saveRecipe()" disabled>📋 Copy Recipe</button>
+          <button class="btn btn-dark" onclick="resetParameters()">↺ Reset</button>
+        </div>
       </div>
     </div>
   </div>
@@ -289,6 +292,7 @@ function loadImageFile(file) {
             document.getElementById('btn-ba').disabled = false;
             document.getElementById('btn-hires').disabled = false;
             document.getElementById('btn-save').disabled = false;
+            document.getElementById('btn-save-recipe').disabled = false;
             startRender();
         }, () => setStatus('Load failed'));
     };
@@ -624,6 +628,25 @@ function downloadCanvas() {
     if (p5inst) p5inst.saveCanvas('art-'+params.seed, 'png');
 }
 
+function saveRecipe() {
+    const recipe = {
+        preset: currentPreset,
+        params: { ...params },
+        timestamp: new Date().toISOString(),
+        note: "Paste into 'Load Recipe' to reproduce this exact look."
+    };
+    const json = JSON.stringify(recipe, null, 2);
+    navigator.clipboard.writeText(json).then(() => {
+        const btn = document.getElementById('btn-save-recipe');
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => btn.textContent = orig, 2000);
+    }).catch(() => {
+        // Fallback: show in alert
+        prompt('Copy this recipe:', json);
+    });
+}
+
 // ─── Auto-load from voice agent ───────────────────────────────────────
 function _tryAutoLoad() {
     let dataURL = sessionStorage.getItem('artImg');
@@ -648,6 +671,7 @@ function _tryAutoLoad() {
         document.getElementById('btn-ba').disabled=false;
         document.getElementById('btn-hires').disabled=false;
         document.getElementById('btn-save').disabled=false;
+        document.getElementById('btn-save-recipe').disabled=false;
         startRender();
     }, () => setStatus('Auto-load failed — drop image manually'));
 }

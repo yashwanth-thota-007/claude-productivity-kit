@@ -140,3 +140,57 @@ def query(prompt: str, top_n: int = TOP_N) -> list:
     scored.sort(key=lambda x: x[0])
     return [{"fact": f, "source": u, "type": t, "match": "semantic"}
             for _, f, u, t in scored[:top_n]]
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    cmd = args[0] if args else ""
+    if not cmd or cmd in ("-h", "--help"):
+        print("Usage: knowledge.py add <fact> [--source <url>] | query <terms> | "
+              "list [--n N] | stats | delete <id>")
+        sys.exit(0)
+
+    if cmd == "add":
+        if len(args) < 2: print("Usage: knowledge.py add <fact> [--source <url>]"); sys.exit(1)
+        source, fact_args = "", args[1:]
+        if "--source" in args:
+            i = args.index("--source"); source = args[i + 1]; fact_args = args[1:i]
+        n = store([" ".join(fact_args)], source_url=source, source_type="manual")
+        print("Stored." if n else "Already known (duplicate).")
+
+    elif cmd == "query":
+        if len(args) < 2: print("Usage: knowledge.py query <terms>"); sys.exit(1)
+        results = query(" ".join(args[1:]))
+        if not results: print("No results.")
+        for r in results:
+            print(f"[{r['type']}] {r['fact']}\n  source: {r['source'] or '—'}\n")
+
+    elif cmd == "list":
+        n = int(args[args.index("--n") + 1]) if "--n" in args else 10
+        rows = knowledge_db().execute(
+            "SELECT id, source_type, fact, added_at FROM knowledge ORDER BY id DESC LIMIT ?", (n,)
+        ).fetchall()
+        if not rows: print("No facts stored yet.")
+        for r in rows:
+            print(f"[{r['id']}] ({r['source_type']}) {r['fact'][:80]}  — {r['added_at']}")
+
+    elif cmd == "stats":
+        conn = knowledge_db()
+        total = conn.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0]
+        by_type = conn.execute(
+            "SELECT source_type, COUNT(*) n FROM knowledge GROUP BY source_type ORDER BY n DESC"
+        ).fetchall()
+        dates = conn.execute("SELECT MIN(added_at), MAX(added_at) FROM knowledge").fetchone()
+        print(f"Total facts: {total}")
+        for r in by_type: print(f"  {r['source_type']}: {r['n']}")
+        print(f"Oldest: {dates[0]}  Newest: {dates[1]}")
+
+    elif cmd == "delete":
+        if len(args) < 2: print("Usage: knowledge.py delete <id>"); sys.exit(1)
+        rid = int(args[1]); conn = knowledge_db()
+        conn.execute("DELETE FROM knowledge WHERE id = ?", (rid,))
+        conn.execute("DELETE FROM knowledge_fts WHERE rowid = ?", (rid,))
+        conn.commit(); print(f"Deleted #{rid}.")
+
+    else:
+        print(f"Unknown subcommand: {cmd}"); sys.exit(1)

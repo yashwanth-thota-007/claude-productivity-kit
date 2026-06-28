@@ -1,219 +1,126 @@
-# Task Status Command
+---
+allowed-tools: Bash
+description: Live kit status — active session, streak, Pomodoro, context, focus lock
+model: haiku
+---
 
-Check the current status of tasks in the orchestration system with various filtering and reporting options.
+# /status — Kit Status
 
-## Usage
+Show a live snapshot of the productivity kit's current state.
 
+## Instructions
+
+Run all checks and display a clean status panel:
+
+```bash
+python3 -c "
+import json, time
+from pathlib import Path
+from datetime import datetime
+
+home = Path.home() / '.claude'
+lines = ['## Kit Status — ' + datetime.now().strftime('%H:%M')]
+
+# Active session
+vs = home / 'voice-session-id'
+if vs.exists():
+    sid = vs.read_text().strip()
+    contract_path = home / 'session-contracts' / f'{sid}.json'
+    if contract_path.exists():
+        try:
+            c = json.loads(contract_path.read_text())
+            title = c.get('session_title', sid[:8])
+            effort = c.get('effort', 'normal')
+            lines.append(f'Session  : {title} [{effort}]')
+        except Exception:
+            lines.append(f'Session  : {sid[:8]}...')
+    else:
+        lines.append(f'Session  : {sid[:8]}...')
+else:
+    lines.append('Session  : none')
+
+# Focus lock
+lock_path = home / 'focus-lock.json'
+if lock_path.exists():
+    try:
+        lock = json.loads(lock_path.read_text())
+        if lock.get('active'):
+            goal = lock.get('goal', '')[:60]
+            blocked = lock.get('blocked_topics', [])
+            lines.append(f'Focus    : {goal}')
+            if blocked:
+                lines.append(f'  Blocked: {chr(44).join(blocked)}')
+        else:
+            lines.append('Focus    : none')
+    except Exception:
+        lines.append('Focus    : none')
+else:
+    lines.append('Focus    : none')
+
+# Pomodoro
+pomo = home / 'pomodoro-state.json'
+if pomo.exists():
+    try:
+        p = json.loads(pomo.read_text())
+        if p.get('active'):
+            started = p.get('started_at', 0)
+            minutes = p.get('minutes', 25)
+            elapsed = int((time.time() - started) / 60)
+            remaining = minutes - elapsed
+            if remaining > 0:
+                lines.append(f'Pomodoro : {remaining}m remaining ({minutes}m block)')
+            else:
+                lines.append(f'Pomodoro : done (overran {-remaining}m)')
+        else:
+            lines.append('Pomodoro : idle')
+    except Exception:
+        lines.append('Pomodoro : idle')
+else:
+    lines.append('Pomodoro : idle')
+
+# Streak
+replays_dir = home / 'session-replays'
+if replays_dir.exists():
+    from datetime import timedelta
+    dates = set()
+    for f in replays_dir.glob('*.md'):
+        if '_weekly' in f.name or '_ondemand' in f.name:
+            continue
+        try:
+            dates.add(datetime.strptime(f.stem[:10], '%Y-%m-%d').date())
+        except Exception:
+            pass
+    streak = 0
+    d = datetime.now().date()
+    while d in dates:
+        streak += 1
+        d -= timedelta(days=1)
+    lines.append(f'Streak   : {streak} day{\"s\" if streak != 1 else \"\"}')
+else:
+    lines.append('Streak   : 0 days')
+
+# Today sessions
+today_str = datetime.now().strftime('%Y-%m-%d')
+today_count = sum(1 for f in (replays_dir.glob('*.md') if replays_dir.exists() else [])
+                  if f.name.startswith(today_str))
+lines.append(f'Today    : {today_count} session{\"s\" if today_count != 1 else \"\"}')
+
+# Recent discernment avg (last 10 scores)
+log = home / 'discernment-log.jsonl'
+if log.exists():
+    try:
+        recent = []
+        for line in log.read_text().splitlines()[-10:]:
+            try:
+                recent.append(float(json.loads(line)['composite']))
+            except Exception:
+                pass
+        if recent:
+            avg = sum(recent) / len(recent)
+            lines.append(f'Quality  : {avg:.1f}/10 (last {len(recent)} responses)')
+    except Exception:
+        pass
+
+print(chr(10).join(lines))
+"
 ```
-/task-status [options]
-```
-
-## Description
-
-Provides comprehensive visibility into task progress, status distribution, and execution metrics across all active orchestrations.
-
-## Command Variants
-
-### Basic Status Overview
-```
-/task-status
-```
-Shows summary of all tasks across all active orchestrations.
-
-### Today's Tasks
-```
-/task-status --today
-```
-Shows only tasks from today's orchestrations.
-
-### Specific Orchestration
-```
-/task-status --date 03_15_2024 --project payment_integration
-```
-Shows tasks from a specific orchestration.
-
-### Status Filter
-```
-/task-status --status in_progress
-/task-status --status qa
-/task-status --status on_hold
-```
-Shows only tasks with specified status.
-
-### Detailed View
-```
-/task-status --detailed
-```
-Shows comprehensive information for each task.
-
-## Output Formats
-
-### Summary View (Default)
-```
-Task Orchestration Status Summary
-=================================
-
-Active Orchestrations: 3
-Total Tasks: 47
-
-Status Distribution:
-┌─────────────┬───────┬────────────┐
-│ Status      │ Count │ Percentage │
-├─────────────┼───────┼────────────┤
-│ completed   │  12   │    26%     │
-│ qa          │   5   │    11%     │
-│ in_progress │   3   │     6%     │
-│ on_hold     │   2   │     4%     │
-│ todos       │  25   │    53%     │
-└─────────────┴───────┴────────────┘
-
-Active Tasks (in_progress):
-- TASK-001: Implement JWT authentication (Agent: dev-frontend)
-- TASK-007: Create payment webhook handler (Agent: dev-backend)
-- TASK-012: Write integration tests (Agent: test-developer)
-
-Blocked Tasks (on_hold):
-- TASK-004: User profile API (Blocked by: TASK-001)
-- TASK-009: Payment confirmation UI (Blocked by: TASK-007)
-```
-
-### Detailed View
-```
-Task Details for: 03_15_2024/authentication_system
-==================================================
-
-TASK-001: Implement JWT authentication
-Status: in_progress
-Agent: dev-frontend
-Started: 2024-03-15T14:30:00Z
-Duration: 3.5 hours
-Progress: 75% (est. 1 hour remaining)
-Dependencies: None
-Blocks: TASK-004, TASK-005
-Location: /task-orchestration/03_15_2024/authentication_system/tasks/in_progress/
-
-Status History:
-- todos → in_progress (2024-03-15T14:30:00Z) by dev-frontend
-```
-
-### Timeline View
-```
-/task-status --timeline
-```
-Shows Gantt-style timeline of task execution.
-
-### Velocity Report
-```
-/task-status --velocity
-```
-Shows completion rates and performance metrics.
-
-## Filtering Options
-
-### By Agent
-```
-/task-status --agent dev-frontend
-```
-
-### By Priority
-```
-/task-status --priority high
-```
-
-### By Type
-```
-/task-status --type feature
-/task-status --type bugfix
-```
-
-### Multiple Filters
-```
-/task-status --status todos --priority high --type security
-```
-
-## Quick Actions
-
-### Show Critical Path
-```
-/task-status --critical-path
-```
-Highlights tasks that are blocking others.
-
-### Show Overdue
-```
-/task-status --overdue
-```
-Shows tasks exceeding estimated time.
-
-### Show Available
-```
-/task-status --available
-```
-Shows todos tasks ready to be picked up.
-
-## Integration Commands
-
-### Export Status
-```
-/task-status --export markdown
-/task-status --export csv
-```
-
-### Watch Mode
-```
-/task-status --watch
-```
-Updates status in real-time (refreshes every 30 seconds).
-
-## Examples
-
-### Example 1: Morning Standup View
-```
-/task-status --today --detailed
-```
-
-### Example 2: Find Blocked Work
-```
-/task-status --status on_hold --show-blockers
-```
-
-### Example 3: Agent Workload
-```
-/task-status --by-agent --status in_progress
-```
-
-### Example 4: Sprint Progress
-```
-/task-status --date 03_15_2024 --metrics
-```
-
-## Metrics and Analytics
-
-### Completion Metrics
-- Average time per task
-- Tasks completed per day
-- Status transition times
-
-### Bottleneck Analysis
-- Most blocking tasks
-- Longest on_hold duration
-- Critical path duration
-
-### Agent Performance
-- Tasks per agent
-- Average completion time
-- Current workload
-
-## Best Practices
-
-1. **Daily Check**: Run `/task-status --today` each morning
-2. **Blocker Review**: Check `/task-status --status on_hold` regularly
-3. **Progress Tracking**: Use `/task-status --velocity` for trends
-4. **Resource Planning**: Monitor `/task-status --by-agent`
-
-## Notes
-
-- Status data is read from TASK-STATUS-TRACKER.yaml files
-- All times are shown in local timezone
-- Completed tasks are included in metrics but not in active lists
-- Use `--all` flag to include historical orchestrations
