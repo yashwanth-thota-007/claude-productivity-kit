@@ -20,6 +20,12 @@ python3 ~/.claude/scripts/search_sessions.py "voice menubar"
 python3 ~/.claude/scripts/search_sessions.py "last tuesday"
 python3 ~/.claude/scripts/search_sessions.py "yesterday"
 
+# Today's sessions
+python3 ~/.claude/scripts/search_sessions.py --today
+
+# Yesterday's sessions
+python3 ~/.claude/scripts/search_sessions.py --yesterday
+
 # Exact date
 python3 ~/.claude/scripts/search_sessions.py --date 2026-06-27
 

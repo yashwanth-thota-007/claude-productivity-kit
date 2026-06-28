@@ -10,6 +10,8 @@ Usage:
   python3 ~/.claude/scripts/search_sessions.py "last tuesday"
   python3 ~/.claude/scripts/search_sessions.py --date 2026-06-27
   python3 ~/.claude/scripts/search_sessions.py --last 3
+  python3 ~/.claude/scripts/search_sessions.py --today
+  python3 ~/.claude/scripts/search_sessions.py --yesterday
 """
 import sys, re
 from pathlib import Path
@@ -149,11 +151,21 @@ def main():
         print("Usage: search_sessions.py <query>")
         print("       search_sessions.py --date 2026-06-27")
         print("       search_sessions.py --last 5")
+        print("       search_sessions.py --today")
+        print("       search_sessions.py --yesterday")
         sys.exit(1)
 
     if args[0] == "--last":
         n = int(args[1]) if len(args) > 1 else 5
         print(format_results(last_n(n)))
+        return
+
+    if args[0] == "--today":
+        print(format_results(date_search(datetime.now())))
+        return
+
+    if args[0] == "--yesterday":
+        print(format_results(date_search(datetime.now() - timedelta(days=1))))
         return
 
     if args[0] == "--date":

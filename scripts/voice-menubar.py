@@ -1417,7 +1417,17 @@ class VoiceApp(rumps.App):
     def _refresh_voice_session_item(self):
         if VOICE_SESSION_FILE.exists():
             sid = VOICE_SESSION_FILE.read_text().strip()
-            self.voice_session_item.title = f"🤖 Session: {sid[:8]}…"
+            # Try to show the human-readable session title from the contract
+            contract_path = Path.home() / ".claude" / "session-contracts" / f"{sid}.json"
+            title = ""
+            if contract_path.exists():
+                try:
+                    c = json.loads(contract_path.read_text())
+                    title = c.get("session_title", "")
+                except Exception:
+                    pass
+            label = title[:32] if title else sid[:8] + "…"
+            self.voice_session_item.title = f"🤖 {label}"
         else:
             self.voice_session_item.title = "🤖 Voice Session: none"
 

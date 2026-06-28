@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 CLAUDE_HOME = Path.home() / ".claude"
@@ -155,6 +155,134 @@ def load_knowledge_stats() -> dict:
     return stats
 
 
+def get_today_at_a_glance(entries: list[dict]) -> dict:
+    """Return today's session count, current streak, and today's discernment avg."""
+    today = date.today()
+    skip = ("_weekly", "_ondemand")
+    filename_re = re.compile(r"^(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}")
+
+    # Count today's replay files and collect today's session IDs
+    today_session_ids: set[str] = set()
+    today_replay_count = 0
+    dated_days: set[date] = set()
+
+    if SESSION_REPLAYS_DIR.exists():
+        for f in SESSION_REPLAYS_DIR.iterdir():
+            if f.suffix != ".md" or any(kw in f.name for kw in skip):
+                continue
+            m = filename_re.match(f.name)
+            if not m:
+                continue
+            try:
+                file_date = date.fromisoformat(m.group(1))
+            except ValueError:
+                continue
+            dated_days.add(file_date)
+            if file_date == today:
+                today_replay_count += 1
+                # Extract 8-char session ID from filename (3rd underscore segment)
+                parts = f.stem.split("_", 3)
+                if len(parts) >= 3:
+                    today_session_ids.add(parts[2])
+
+    # Current streak: consecutive days ending today (or yesterday if today has none)
+    streak = 0
+    check = today
+    while check in dated_days:
+        streak += 1
+        check -= timedelta(days=1)
+
+    # Today's discernment avg using session IDs from today's replays
+    today_scores = [
+        e.get("composite", 0)
+        for e in entries
+        if e.get("session_id", "")[:8] in today_session_ids and e.get("composite")
+    ]
+    discernment_avg = sum(today_scores) / len(today_scores) if today_scores else None
+
+    return {
+        "today_sessions": today_replay_count,
+        "streak": streak,
+        "discernment_avg": discernment_avg,
+    }
+
+
+_STOPWORDS = frozenset(
+    "a an the and or in on at to of is was are were be been for from with this that it its"
+    " i we you they he she what how when where which who by as up do did can could will"
+    " build built add added run ran fix fixed make made use used create created update updated".split()
+)
+
+
+def get_knowledge_gaps() -> list[str]:
+    """Return up to 5 topics from recent replays with no knowledge DB entries."""
+    cutoff = date.today() - timedelta(days=7)
+    skip = ("_weekly", "_ondemand")
+    filename_re = re.compile(r"^(\d{4}-\d{2}-\d{2})_")
+
+    bullet_re = re.compile(r"^- (.+)", re.MULTILINE)
+    section_re = re.compile(
+        r"## What Was (?:Done|Built)\s*\n(.*?)(?=\n##|\Z)", re.DOTALL
+    )
+
+    extracted: list[str] = []
+    if SESSION_REPLAYS_DIR.exists():
+        for f in SESSION_REPLAYS_DIR.iterdir():
+            if f.suffix != ".md" or any(kw in f.name for kw in skip):
+                continue
+            m = filename_re.match(f.name)
+            if not m:
+                continue
+            try:
+                file_date = date.fromisoformat(m.group(1))
+            except ValueError:
+                continue
+            if file_date < cutoff:
+                continue
+            try:
+                content = f.read_text(errors="replace")
+            except IOError:
+                continue
+            sec = section_re.search(content)
+            if not sec:
+                continue
+            for bullet in bullet_re.findall(sec.group(1)):
+                # Strip bold markers and take the first meaningful noun phrase (up to 3 words)
+                clean = re.sub(r"\*\*(.+?)\*\*", r"\1", bullet).strip()
+                words = [w for w in re.split(r"[\s:,\-–]+", clean) if w.lower() not in _STOPWORDS and len(w) > 2]
+                if words:
+                    extracted.append(" ".join(words[:3]))
+
+    if not extracted or not KNOWLEDGE_DB.exists():
+        return []
+
+    gaps: list[str] = []
+    seen_topics: set[str] = set()
+    try:
+        conn = sqlite3.connect(str(KNOWLEDGE_DB))
+        cursor = conn.cursor()
+        for topic in extracted:
+            if topic.lower() in seen_topics:
+                continue
+            seen_topics.add(topic.lower())
+            try:
+                cursor.execute(
+                    "SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH ? LIMIT 1",
+                    (topic,),
+                )
+                if cursor.fetchone() is None:
+                    gaps.append(topic)
+            except sqlite3.OperationalError:
+                pass
+            if len(gaps) >= 5:
+                break
+        conn.close()
+    except sqlite3.Error:
+        pass
+
+    return gaps[:5]
+
+
 def calculate_averages(entries: list[dict]) -> dict:
     """Calculate average scores for each dimension."""
     if not entries:
@@ -262,6 +390,8 @@ def generate_html(
     contracts: dict[str, dict],
     replays: list[dict],
     knowledge_stats: dict,
+    glance: dict,
+    knowledge_gaps: list[str],
 ) -> str:
     """Generate the complete HTML dashboard."""
 
@@ -412,6 +542,37 @@ def generate_html(
         """
     else:
         weakest_html = '<p class="no-data">Not enough data for analysis</p>'
+
+    # Build "Today at a Glance" cards HTML
+    streak_display = f"{glance['streak']} day{'s' if glance['streak'] != 1 else ''}"
+    avg_display = f"{glance['discernment_avg']:.1f}" if glance["discernment_avg"] is not None else "—"
+    glance_html = f"""
+        <div class="glance-row">
+            <div class="glance-card">
+                <div class="glance-number">{glance['today_sessions']}</div>
+                <div class="glance-label">Today's Sessions</div>
+            </div>
+            <div class="glance-card">
+                <div class="glance-number">{streak_display}</div>
+                <div class="glance-label">Current Streak</div>
+            </div>
+            <div class="glance-card">
+                <div class="glance-number">{avg_display}</div>
+                <div class="glance-label">Discernment Avg Today</div>
+            </div>
+        </div>
+        """
+
+    # Build knowledge gaps HTML
+    if knowledge_gaps:
+        gap_items = "".join(
+            f'<div class="gap-item"><span>{escape_html(gap)}</span>'
+            f'<span class="gap-hint">Consider running `/knowledge add`</span></div>'
+            for gap in knowledge_gaps
+        )
+        gaps_html = f'<div class="gaps-section">{gap_items}</div>'
+    else:
+        gaps_html = '<p class="no-data">Knowledge base covers recent work well.</p>'
 
     # Assemble final HTML
     html = f"""<!DOCTYPE html>
@@ -675,6 +836,56 @@ def generate_html(
             font-size: 0.9rem;
             line-height: 1.5;
         }}
+        .glance-row {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+        @media (max-width: 600px) {{
+            .glance-row {{
+                grid-template-columns: 1fr;
+            }}
+        }}
+        .glance-card {{
+            background: {COLORS["card_bg"]};
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            padding: 20px;
+            text-align: center;
+        }}
+        .glance-card .glance-number {{
+            font-size: 2.4rem;
+            font-weight: 700;
+            color: {COLORS["orange"]};
+            line-height: 1.1;
+        }}
+        .glance-card .glance-label {{
+            font-size: 0.8rem;
+            color: {COLORS["gray"]};
+            margin-top: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }}
+        .gaps-section {{
+            margin-bottom: 24px;
+        }}
+        .gap-item {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid {COLORS["border"]};
+            font-size: 0.9rem;
+        }}
+        .gap-item:last-child {{
+            border-bottom: none;
+        }}
+        .gap-hint {{
+            font-size: 0.75rem;
+            color: {COLORS["blue"]};
+            font-style: italic;
+        }}
     </style>
 </head>
 <body>
@@ -683,6 +894,8 @@ def generate_html(
             <h1>Claude Code Dashboard</h1>
             <div class="subtitle">{today} &bull; {total_sessions} sessions tracked</div>
         </header>
+
+        {glance_html}
 
         <div class="card">
             <h2>Discernment Trend (Last 30 Scores)</h2>
@@ -742,6 +955,11 @@ def generate_html(
                 <h2>Weakest Dimension</h2>
                 {weakest_html}
             </div>
+        </div>
+
+        <div class="card">
+            <h2>Knowledge Gaps</h2>
+            {gaps_html}
         </div>
     </div>
 
@@ -849,9 +1067,11 @@ def main():
     contracts = load_session_contracts()
     replays = load_session_replays()
     knowledge_stats = load_knowledge_stats()
+    glance = get_today_at_a_glance(entries)
+    knowledge_gaps = get_knowledge_gaps()
 
     # Generate HTML
-    html = generate_html(entries, contracts, replays, knowledge_stats)
+    html = generate_html(entries, contracts, replays, knowledge_stats, glance, knowledge_gaps)
 
     # Write to file
     OUTPUT_HTML.write_text(html)
