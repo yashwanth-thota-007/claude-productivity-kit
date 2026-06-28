@@ -143,6 +143,7 @@ def query(prompt: str, top_n: int = TOP_N) -> list:
 
 
 if __name__ == "__main__":
+    import os; os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
     args = sys.argv[1:]
     cmd = args[0] if args else ""
     if not cmd or cmd in ("-h", "--help"):
@@ -191,6 +192,14 @@ if __name__ == "__main__":
         conn.execute("DELETE FROM knowledge WHERE id = ?", (rid,))
         conn.execute("DELETE FROM knowledge_fts WHERE rowid = ?", (rid,))
         conn.commit(); print(f"Deleted #{rid}.")
+
+    elif cmd == "batch":
+        # Read newline-separated facts from stdin, store all in one model-load
+        import os; os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+        facts = [line.strip() for line in sys.stdin if line.strip()]
+        if not facts: print("No input."); sys.exit(0)
+        n = store(facts, source_type="manual")
+        print(f"Stored {n}/{len(facts)} (rest were duplicates).")
 
     else:
         print(f"Unknown subcommand: {cmd}"); sys.exit(1)

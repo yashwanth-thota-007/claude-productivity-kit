@@ -15,6 +15,9 @@ _model = None
 def embed(text: str) -> list:
     global _model
     if _model is None:
+        import os, logging
+        os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+        logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
         from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model.encode(text, normalize_embeddings=True).tolist()
