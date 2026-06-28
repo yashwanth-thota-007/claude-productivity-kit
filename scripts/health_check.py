@@ -137,9 +137,44 @@ check("session-replays dir", lambda: (
 check("scripts present", lambda: (
     all((CLAUDE_DIR / "scripts" / s).exists() for s in [
         "voice-menubar.py","session-contract.py","discernment-scorer.py",
-        "session-replay.py","standup.py","summarize.py","weekly.py","search_sessions.py"
+        "session-replay.py","standup.py","summarize.py","weekly.py","search_sessions.py",
+        "knowledge.py","knowledge_indexer.py","db.py","embed.py",
+        "project_mental_model.py","init_project_context.py","pre_commit_gate.py",
+        "dashboard.py","index_session.py","smart-compact.py",
     ]),
     "all present"
+))
+
+check("py: sentence_transformers", lambda: check_py_pkg("sentence_transformers"))
+
+def _db_count(db_path: Path, table: str) -> tuple:
+    if not db_path.exists():
+        return False, f"{db_path.name} not found"
+    import sqlite3
+    try:
+        n = sqlite3.connect(str(db_path)).execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        return True, f"{n} rows"
+    except Exception as e:
+        return False, str(e)
+
+check("knowledge.db",   lambda: _db_count(CLAUDE_DIR / "knowledge.db", "knowledge"))
+check("sessions.db",    lambda: _db_count(CLAUDE_DIR / "sessions.db", "sessions"))
+
+check("discernment log", lambda: (
+    (CLAUDE_DIR / "discernment-log.jsonl").exists(),
+    f"{len((CLAUDE_DIR / 'discernment-log.jsonl').read_text().splitlines())} entries"
+    if (CLAUDE_DIR / "discernment-log.jsonl").exists() else "missing — will be created on first session"
+))
+
+check("session-contracts dir", lambda: (
+    (CLAUDE_DIR / "session-contracts").exists(),
+    f"{len(list((CLAUDE_DIR / 'session-contracts').glob('*.json')))} contracts"
+    if (CLAUDE_DIR / "session-contracts").exists() else "missing"
+))
+
+check("algorithmic-art skill", lambda: (
+    (CLAUDE_DIR / "skills" / "algorithmic-art" / "image-to-art.html").exists(),
+    "image-to-art.html present"
 ))
 
 # ── Print results ─────────────────────────────────────────────────────────────
