@@ -22,7 +22,10 @@
             {"type": "command", "command": "python3 ~/.claude/scripts/session-contract.py"}
         ]}],
         "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "jq -r '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"updatedInput\": (.tool_input + {\"command\": (\"rtk bash -c \" + (.tool_input.command | @sh))})}}'"  }]}],
-        "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "jq -r '.session_id' | tee ~/.claude/active-session-id"}]}],
+        "SessionStart": [{"matcher": "", "hooks": [
+            {"type": "command", "command": "jq -r '.session_id' | tee ~/.claude/active-session-id"},
+            {"type": "command", "command": "python3 ~/.claude/scripts/init_project_context.py", "timeout": 30}
+        ]}],
         "Stop": [
             {"matcher": "", "hooks": [
                 {"type": "command", "command": "python3 ~/.claude/scripts/discernment-scorer.py", "timeout": 30},
