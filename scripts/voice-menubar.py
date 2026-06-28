@@ -1582,8 +1582,7 @@ class VoiceApp(rumps.App):
         if self._agent_mode:
             session_name = self._agent_session_name(text)
             self._ensure_agentfs_session(session_name)
-            # --allow / gives agent full write access; COW layer keeps real files safe
-            cmd = [self._agentfs_bin(), "run", "--session", session_name, "--allow", "/"] + claude_cmd
+            cmd = [self._agentfs_bin(), "run", "--session", session_name] + claude_cmd
         else:
             cmd = claude_cmd
             session_name = None
