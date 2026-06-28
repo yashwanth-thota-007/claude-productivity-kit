@@ -207,6 +207,24 @@ def get_today_at_a_glance(entries: list[dict]) -> dict:
     }
 
 
+def get_activity_heatmap() -> dict[str, int]:
+    """Return a dict of {'YYYY-MM-DD': session_count} from session replay filenames."""
+    counts: dict[str, int] = {}
+    if not SESSION_REPLAYS_DIR.exists():
+        return counts
+    skip = ("_weekly", "_ondemand")
+    filename_re = re.compile(r"^(\d{4}-\d{2}-\d{2})_")
+    for f in SESSION_REPLAYS_DIR.iterdir():
+        if f.suffix != ".md" or any(kw in f.name for kw in skip):
+            continue
+        m = filename_re.match(f.name)
+        if not m:
+            continue
+        day = m.group(1)
+        counts[day] = counts.get(day, 0) + 1
+    return counts
+
+
 _STOPWORDS = frozenset(
     "a an the and or in on at to of is was are were be been for from with this that it its"
     " i we you they he she what how when where which who by as up do did can could will"
@@ -383,6 +401,98 @@ def truncate(text: str, length: int) -> str:
     if len(text) <= length:
         return text
     return text[:length - 3] + "..."
+
+
+_HEATMAP_COLORS = ["#e5e4e0", "#f5c4b4", "#eda98a", "#d97757"]
+
+
+def _build_heatmap_html(activity: dict[str, int]) -> str:
+    """Build the GitHub-style contribution heatmap HTML."""
+    today = date.today()
+
+    # Grid starts on the Monday of the week 52 weeks ago from today's week.
+    # "Today's week" Monday:
+    week_start_monday = today - timedelta(days=today.weekday())
+    grid_start = week_start_monday - timedelta(weeks=52)  # 53 weeks total displayed
+
+    # Total days: from grid_start to the Sunday of today's week (inclusive)
+    week_end_sunday = week_start_monday + timedelta(days=6)
+    total_days = (week_end_sunday - grid_start).days + 1  # always 53*7 = 371
+    num_weeks = total_days // 7  # 53
+
+    # Build week columns: list of 7-day lists
+    weeks: list[list[date]] = []
+    for w in range(num_weeks):
+        col = [grid_start + timedelta(days=w * 7 + d) for d in range(7)]
+        weeks.append(col)
+
+    # Month labels: one per column where the month changes
+    MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    month_labels: list[tuple[int, str]] = []  # (col_index, label)
+    prev_month = None
+    for w_idx, col in enumerate(weeks):
+        col_month = col[0].month
+        if col_month != prev_month:
+            month_labels.append((w_idx, MONTH_ABBR[col_month - 1]))
+            prev_month = col_month
+
+    # Build month label row (each cell = 13px wide: 11px + 2px gap)
+    cell_w = 13  # 11px cell + 2px gap
+    months_html_parts = []
+    for i, (col_idx, label) in enumerate(month_labels):
+        left_px = col_idx * cell_w
+        next_left = month_labels[i + 1][0] * cell_w if i + 1 < len(month_labels) else num_weeks * cell_w
+        width_px = next_left - left_px
+        months_html_parts.append(
+            f'<div class="heatmap-month-label" style="width:{width_px}px;">{label}</div>'
+        )
+    months_row = f'<div class="heatmap-months">{"".join(months_html_parts)}</div>'
+
+    # Build grid columns
+    cols_html = []
+    for col in weeks:
+        cells = []
+        for d in col:
+            if d > today:
+                # Future days: render as empty/gray placeholder
+                color = _HEATMAP_COLORS[0]
+                tooltip = ""
+            else:
+                day_str = d.isoformat()
+                count = activity.get(day_str, 0)
+                color_idx = min(count, 3)
+                color = _HEATMAP_COLORS[color_idx]
+                label = f"{count} session{'s' if count != 1 else ''}"
+                tooltip = f'{d.strftime("%b %d, %Y")} — {label}'
+            title_attr = f' title="{tooltip}"' if tooltip else ""
+            cells.append(
+                f'<div class="heatmap-cell" style="background:{color};"{title_attr}></div>'
+            )
+        cols_html.append(f'<div class="heatmap-col">{"".join(cells)}</div>')
+
+    grid_rows = f'<div class="heatmap-rows">{"".join(cols_html)}</div>'
+
+    legend = (
+        '<div class="heatmap-legend">'
+        '<span>Less</span>'
+        f'<span class="heatmap-legend-cell" style="background:{_HEATMAP_COLORS[0]};" title="0 sessions"></span>'
+        f'<span class="heatmap-legend-cell" style="background:{_HEATMAP_COLORS[1]};" title="1 session"></span>'
+        f'<span class="heatmap-legend-cell" style="background:{_HEATMAP_COLORS[2]};" title="2 sessions"></span>'
+        f'<span class="heatmap-legend-cell" style="background:{_HEATMAP_COLORS[3]};" title="3+ sessions"></span>'
+        '<span>More</span>'
+        '</div>'
+    )
+
+    return (
+        f'<div class="heatmap-wrapper">'
+        f'<div class="heatmap-grid">'
+        f'{months_row}'
+        f'{grid_rows}'
+        f'</div>'
+        f'{legend}'
+        f'</div>'
+    )
 
 
 def generate_html(
@@ -573,6 +683,10 @@ def generate_html(
         gaps_html = f'<div class="gaps-section">{gap_items}</div>'
     else:
         gaps_html = '<p class="no-data">Knowledge base covers recent work well.</p>'
+
+    # Build activity heatmap
+    activity = get_activity_heatmap()
+    heatmap_html = _build_heatmap_html(activity)
 
     # Assemble final HTML
     html = f"""<!DOCTYPE html>
@@ -886,6 +1000,52 @@ def generate_html(
             color: {COLORS["blue"]};
             font-style: italic;
         }}
+        .heatmap-wrapper {{
+            overflow-x: auto;
+        }}
+        .heatmap-grid {{
+            display: inline-flex;
+            flex-direction: column;
+            gap: 0;
+        }}
+        .heatmap-months {{
+            display: flex;
+            margin-bottom: 4px;
+        }}
+        .heatmap-month-label {{
+            font-size: 0.7rem;
+            color: {COLORS["gray"]};
+            white-space: nowrap;
+        }}
+        .heatmap-rows {{
+            display: flex;
+            gap: 2px;
+        }}
+        .heatmap-col {{
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }}
+        .heatmap-cell {{
+            width: 11px;
+            height: 11px;
+            border-radius: 2px;
+            cursor: default;
+        }}
+        .heatmap-legend {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 12px;
+            font-size: 0.75rem;
+            color: {COLORS["gray"]};
+        }}
+        .heatmap-legend-cell {{
+            width: 11px;
+            height: 11px;
+            border-radius: 2px;
+            display: inline-block;
+        }}
     </style>
 </head>
 <body>
@@ -896,6 +1056,11 @@ def generate_html(
         </header>
 
         {glance_html}
+
+        <div class="card">
+            <h2>Session Activity (last 52 weeks)</h2>
+            {heatmap_html}
+        </div>
 
         <div class="card">
             <h2>Discernment Trend (Last 30 Scores)</h2>
