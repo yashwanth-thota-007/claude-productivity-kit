@@ -21,7 +21,10 @@
             {"type": "command", "command": "python3 ~/.claude/scripts/start-work-advisor.py"},
             {"type": "command", "command": "python3 ~/.claude/scripts/session-contract.py"}
         ]}],
-        "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "jq -r '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"updatedInput\": (.tool_input + {\"command\": (\"rtk bash -c \" + (.tool_input.command | @sh))})}}'"  }]}],
+        "PreToolUse": [{"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "jq -r '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"updatedInput\": (.tool_input + {\"command\": (\"rtk bash -c \" + (.tool_input.command | @sh))})}}'" },
+            {"type": "command", "command": "python3 ~/.claude/scripts/pre_commit_gate.py", "timeout": 10}
+        ]}],
         "SessionStart": [{"matcher": "", "hooks": [
             {"type": "command", "command": "jq -r '.session_id' | tee ~/.claude/active-session-id"},
             {"type": "command", "command": "python3 ~/.claude/scripts/init_project_context.py", "timeout": 30}
