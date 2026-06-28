@@ -1553,9 +1553,70 @@ class VoiceApp(rumps.App):
         except Exception:
             return ""
 
+    _ART_INTENT_PHRASES = (
+        "make art", "generate art", "turn into art", "convert to art",
+        "algorithmic art", "particle art", "make it art", "art from this",
+        "make this art", "generative art",
+    )
+
+    def _maybe_open_art(self, text: str) -> bool:
+        """If the request looks like image-to-art, save clipboard image and open the artifact.
+        Returns True if handled (caller should skip Claude call)."""
+        low = text.lower()
+        if not any(p in low for p in self._ART_INTENT_PHRASES):
+            return False
+        # Resolve image path — pending screenshot or clipboard
+        if self._pending_screenshot:
+            img_path = str(self._pending_screenshot)
+            self._pending_screenshot = None
+        else:
+            data, fmt = self._clipboard_image()
+            if not data:
+                return False
+            out = self._next_image_path()
+            if fmt == "tiff":
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".tiff", delete=False) as f:
+                    f.write(data)
+                    tmp = Path(f.name)
+                subprocess.run(
+                    ["sips", "-s", "format", "png", str(tmp), "--out", str(out)],
+                    capture_output=True,
+                )
+                tmp.unlink(missing_ok=True)
+            else:
+                out.write_bytes(data)
+            if not out.exists() or out.stat().st_size == 0:
+                return False
+            img_path = str(out)
+
+        art_html = Path.home() / ".claude" / "skills" / "algorithmic-art" / "image-to-art.html"
+        # Encode image as base64 data URI — avoids file:// CORS block in Chrome/Safari
+        import base64, mimetypes
+        mime = mimetypes.guess_type(img_path)[0] or "image/png"
+        b64 = base64.b64encode(Path(img_path).read_bytes()).decode()
+        data_uri = f"data:{mime};base64,{b64}"
+        # Write a tiny one-shot HTML wrapper that embeds the data URI and redirects
+        # to the artifact with it encoded in sessionStorage (avoids URL length limits)
+        launcher = Path(img_path).parent / "art-launcher.html"
+        launcher.write_text(f"""<!DOCTYPE html><html><body><script>
+sessionStorage.setItem('artImg','{data_uri}');
+location.href='file://{art_html}';
+</script></body></html>""")
+        url = f"file://{launcher}"
+        subprocess.Popen(["open", url])
+        self._overlay.stream_chunk(f"Opening art generator with your image…\n`{Path(img_path).name}`")
+        play_sound(SOUND_STOP)
+        self._reset_idle("Ready")
+        self._wake_listener.resume()
+        return True
+
     def _send_to_claude(self, text: str):
         """Stream claude response, pushing text chunks to overlay as they arrive."""
         self.status_item.title = "Status: Asking Claude..."
+
+        if self._maybe_open_art(text):
+            return
 
         img_prefix = self._clipboard_image_for_voice()
         if self._agent_mode:

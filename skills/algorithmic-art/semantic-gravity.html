@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Semantic Gravity — Generative Art</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --anthropic-dark: #141413;
+            --anthropic-light: #faf9f5;
+            --anthropic-mid-gray: #b0aea5;
+            --anthropic-light-gray: #e8e6dc;
+            --anthropic-orange: #d97757;
+            --anthropic-blue: #6a9bcc;
+            --anthropic-green: #788c5d;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, var(--anthropic-light) 0%, #f5f3ee 100%);
+            min-height: 100vh;
+            color: var(--anthropic-dark);
+        }
+        .container { display: flex; min-height: 100vh; padding: 20px; gap: 20px; }
+        .sidebar {
+            width: 320px; flex-shrink: 0;
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(10px);
+            padding: 24px; border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(20,20,19,0.1);
+            overflow-y: auto; overflow-x: hidden;
+        }
+        .sidebar h1 { font-family: 'Lora', serif; font-size: 22px; font-weight: 500; color: var(--anthropic-dark); margin-bottom: 8px; }
+        .sidebar .subtitle { color: var(--anthropic-mid-gray); font-size: 13px; margin-bottom: 32px; line-height: 1.5; }
+        .control-section { margin-bottom: 28px; }
+        .control-section h3 {
+            font-size: 15px; font-weight: 600; color: var(--anthropic-dark);
+            margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+        }
+        .control-section h3::before { content: '•'; color: var(--anthropic-orange); font-weight: bold; }
+        .seed-input {
+            width: 100%; background: var(--anthropic-light); padding: 12px;
+            border-radius: 8px; font-family: 'Courier New', monospace; font-size: 14px;
+            margin-bottom: 12px; border: 1px solid var(--anthropic-light-gray); text-align: center;
+        }
+        .seed-input:focus { outline: none; border-color: var(--anthropic-orange); box-shadow: 0 0 0 2px rgba(217,119,87,0.1); background: white; }
+        .seed-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+        .control-group { margin-bottom: 18px; }
+        .control-group label { display: block; font-size: 13px; font-weight: 500; color: var(--anthropic-dark); margin-bottom: 7px; }
+        .slider-container { display: flex; align-items: center; gap: 12px; }
+        .slider-container input[type="range"] {
+            flex: 1; height: 4px; background: var(--anthropic-light-gray);
+            border-radius: 2px; outline: none; -webkit-appearance: none;
+        }
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 16px; height: 16px;
+            background: var(--anthropic-orange); border-radius: 50%;
+            cursor: pointer; transition: all 0.2s ease;
+        }
+        .slider-container input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.1); background: #c86641; }
+        .slider-container input[type="range"]::-moz-range-thumb {
+            width: 16px; height: 16px; background: var(--anthropic-orange);
+            border-radius: 50%; border: none; cursor: pointer;
+        }
+        .value-display { font-family: 'Courier New', monospace; font-size: 12px; color: var(--anthropic-mid-gray); min-width: 48px; text-align: right; }
+        .legend { display: flex; flex-direction: column; gap: 6px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--anthropic-mid-gray); }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .button {
+            background: var(--anthropic-orange); color: white; border: none;
+            padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s ease; width: 100%;
+        }
+        .button:hover { background: #c86641; transform: translateY(-1px); }
+        .button:active { transform: translateY(0); }
+        .button.secondary { background: var(--anthropic-blue); }
+        .button.secondary:hover { background: #5a8bb8; }
+        .button.tertiary { background: var(--anthropic-green); }
+        .button.tertiary:hover { background: #6b7b52; }
+        .button-row { display: flex; gap: 8px; }
+        .button-row .button { flex: 1; }
+        .canvas-area { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+        #canvas-container {
+            width: 100%; max-width: 1000px; border-radius: 12px;
+            overflow: hidden; box-shadow: 0 20px 40px rgba(20,20,19,0.12); background: #0d0e11;
+        }
+        #canvas-container canvas { display: block; width: 100% !important; height: auto !important; }
+        .loading { display: flex; align-items: center; justify-content: center; padding: 60px; font-size: 16px; color: var(--anthropic-mid-gray); }
+        @media (max-width: 600px) {
+            .container { flex-direction: column; }
+            .sidebar { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="sidebar">
+        <h1>Semantic Gravity</h1>
+        <div class="subtitle">Knowledge particles drift through noise fields, drawn toward memory nodes by semantic affinity. Connections crystallize when understanding meets.</div>
+
+        <div class="control-section">
+            <h3>Seed</h3>
+            <input type="number" id="seed-input" class="seed-input" value="42" onchange="updateSeed()">
+            <div class="seed-controls">
+                <button class="button secondary" onclick="previousSeed()">← Prev</button>
+                <button class="button secondary" onclick="nextSeed()">Next →</button>
+            </div>
+            <button class="button tertiary" style="margin-top:0" onclick="randomSeedAndUpdate()">↻ Random</button>
+        </div>
+
+        <div class="control-section">
+            <h3>Parameters</h3>
+
+            <div class="control-group">
+                <label>Memory Nodes</label>
+                <div class="slider-container">
+                    <input type="range" id="nodeCount" min="4" max="24" step="1" value="10" oninput="updateParam('nodeCount', parseInt(this.value))">
+                    <span class="value-display" id="nodeCount-value">10</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Particle Density</label>
+                <div class="slider-container">
+                    <input type="range" id="particleDensity" min="20" max="120" step="5" value="60" oninput="updateParam('particleDensity', parseInt(this.value))">
+                    <span class="value-display" id="particleDensity-value">60</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Drift Speed</label>
+                <div class="slider-container">
+                    <input type="range" id="driftSpeed" min="0.3" max="2.5" step="0.1" value="1.0" oninput="updateParam('driftSpeed', parseFloat(this.value))">
+                    <span class="value-display" id="driftSpeed-value">1.0</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Connection Horizon</label>
+                <div class="slider-container">
+                    <input type="range" id="connectionRadius" min="80" max="400" step="10" value="200" oninput="updateParam('connectionRadius', parseInt(this.value))">
+                    <span class="value-display" id="connectionRadius-value">200</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Noise Turbulence</label>
+                <div class="slider-container">
+                    <input type="range" id="noiseScale" min="0.001" max="0.012" step="0.001" value="0.004" oninput="updateParam('noiseScale', parseFloat(this.value))">
+                    <span class="value-display" id="noiseScale-value">0.004</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Memory Decay</label>
+                <div class="slider-container">
+                    <input type="range" id="decayRate" min="0.001" max="0.02" step="0.001" value="0.005" oninput="updateParam('decayRate', parseFloat(this.value))">
+                    <span class="value-display" id="decayRate-value">0.005</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="control-section">
+            <h3>Semantic Types</h3>
+            <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#d97757"></div>Implementation</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#6a9bcc"></div>Research</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#788c5d"></div>Planning</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#9b7db8"></div>Reflection</div>
+            </div>
+        </div>
+
+        <div class="control-section">
+            <h3>Actions</h3>
+            <div class="button-row">
+                <button class="button" onclick="resetParameters()">Reset</button>
+                <button class="button secondary" onclick="downloadCanvas()">Save PNG</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="canvas-area">
+        <div id="canvas-container">
+            <div class="loading">Initializing knowledge field…</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// SEMANTIC GRAVITY — knowledge graph emergence algorithm
+// ═══════════════════════════════════════════════════════════════════
+
+let params = {
+    seed: 42,
+    nodeCount: 10,
+    particleDensity: 60,
+    driftSpeed: 1.0,
+    connectionRadius: 200,
+    noiseScale: 0.004,
+    decayRate: 0.005,
+};
+let defaultParams = { ...params };
+
+// Semantic type configs: [r, g, b], absorptionRadius
+const TYPES = [
+    { name: 'impl',   rgb: [217, 119, 87],  absorb: 28 },  // orange
+    { name: 'research', rgb: [106, 155, 204], absorb: 32 }, // blue
+    { name: 'plan',   rgb: [120, 140, 93],   absorb: 24 }, // green
+    { name: 'reflect', rgb: [155, 125, 184], absorb: 26 }, // violet
+];
+
+let nodes = [];
+let particles = [];
+let connections = [];   // { a, b, strength, cp: {x,y} }  — persistent arcs
+let noiseZ = 0;
+
+// ─── Node ───────────────────────────────────────────────────────────
+class MemoryNode {
+    constructor(x, y, typeIdx) {
+        this.x = x;
+        this.y = y;
+        this.typeIdx = typeIdx;
+        this.type = TYPES[typeIdx];
+        this.mass = random(18, 34);        // radius
+        this.pulse = random(TWO_PI);
+        this.absorbed = 0;                 // count of absorbed particles
+        this.glowAlpha = 0;
+    }
+
+    absorb() {
+        this.absorbed++;
+        this.glowAlpha = 1.0;
+        // grow slightly on absorption, cap at 52
+        this.mass = min(this.mass + 0.6, 52);
+    }
+
+    update() {
+        this.pulse += 0.018;
+        this.glowAlpha = max(0, this.glowAlpha - 0.025);
+    }
+
+    draw() {
+        let [r, g, b] = this.type.rgb;
+        let pSize = this.mass + sin(this.pulse) * 2.5;
+
+        // outer glow on absorption
+        if (this.glowAlpha > 0.01) {
+            noStroke();
+            fill(r, g, b, this.glowAlpha * 60);
+            ellipse(this.x, this.y, pSize * 3.2, pSize * 3.2);
+        }
+
+        // halo
+        noStroke();
+        fill(r, g, b, 28);
+        ellipse(this.x, this.y, pSize * 2.2, pSize * 2.2);
+
+        // core
+        fill(r, g, b, 220);
+        ellipse(this.x, this.y, pSize, pSize);
+
+        // specular highlight
+        fill(255, 255, 255, 55);
+        ellipse(this.x - pSize * 0.18, this.y - pSize * 0.18, pSize * 0.38, pSize * 0.28);
+    }
+}
+
+// ─── Knowledge Particle ─────────────────────────────────────────────
+class KnowledgeParticle {
+    constructor() {
+        this.reset();
+    }
+
+    reset() {
+        // spawn from canvas edge
+        let edge = floor(random(4));
+        if (edge === 0)      { this.x = random(width);  this.y = -8; }
+        else if (edge === 1) { this.x = width + 8;       this.y = random(height); }
+        else if (edge === 2) { this.x = random(width);  this.y = height + 8; }
+        else                 { this.x = -8;              this.y = random(height); }
+
+        this.typeIdx = floor(random(TYPES.length));
+        this.type = TYPES[this.typeIdx];
+        this.lifespan = random(300, 600);
+        this.age = 0;
+        this.vx = 0;
+        this.vy = 0;
+        this.dead = false;
+        this.trail = [];
+        this.trailMax = 9;
+    }
+
+    update() {
+        this.age++;
+        if (this.age > this.lifespan) { this.dead = true; return; }
+
+        // Perlin noise drift
+        let angle = noise(this.x * params.noiseScale, this.y * params.noiseScale, noiseZ) * TWO_PI * 2.4;
+        let speed = params.driftSpeed;
+        this.vx += cos(angle) * 0.28;
+        this.vy += sin(angle) * 0.28;
+
+        // gravity pull from same-type nodes
+        for (let n of nodes) {
+            if (n.typeIdx !== this.typeIdx) continue;
+            let dx = n.x - this.x;
+            let dy = n.y - this.y;
+            let d = sqrt(dx * dx + dy * dy);
+            if (d < 1) continue;
+            // gravity inversely proportional to distance, active beyond absorption radius
+            if (d > n.type.absorb * 2 && d < params.connectionRadius * 1.6) {
+                let strength = (n.mass * 0.0015) / (d * 0.012);
+                this.vx += (dx / d) * strength;
+                this.vy += (dy / d) * strength;
+            }
+            // absorption
+            if (d < n.type.absorb + n.mass * 0.4) {
+                this._absorbed(n);
+                return;
+            }
+        }
+
+        // velocity damping
+        this.vx *= 0.88;
+        this.vy *= 0.88;
+
+        // clamp speed
+        let spd = sqrt(this.vx * this.vx + this.vy * this.vy);
+        if (spd > speed * 2.2) {
+            this.vx = (this.vx / spd) * speed * 2.2;
+            this.vy = (this.vy / spd) * speed * 2.2;
+        }
+
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > this.trailMax) this.trail.shift();
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // out-of-bounds
+        if (this.x < -20 || this.x > width + 20 || this.y < -20 || this.y > height + 20) {
+            this.dead = true;
+        }
+    }
+
+    _absorbed(node) {
+        this.dead = true;
+        node.absorb();
+        // find nearest same-type node within connection horizon → crystallize arc
+        let nearest = null;
+        let minD = params.connectionRadius;
+        for (let n2 of nodes) {
+            if (n2 === node || n2.typeIdx !== node.typeIdx) continue;
+            let dx = n2.x - node.x;
+            let dy = n2.y - node.y;
+            let d = sqrt(dx * dx + dy * dy);
+            if (d < minD) { minD = d; nearest = n2; }
+        }
+        if (nearest) {
+            _reinforce(node, nearest);
+        }
+    }
+
+    draw() {
+        let [r, g, b] = this.type.rgb;
+        let lifeRatio = 1 - (this.age / this.lifespan);
+
+        // draw trail
+        for (let i = 0; i < this.trail.length; i++) {
+            let t = i / this.trail.length;
+            let alpha = t * lifeRatio * 120;
+            noStroke();
+            fill(r, g, b, alpha);
+            ellipse(this.trail[i].x, this.trail[i].y, 2.5 * t, 2.5 * t);
+        }
+
+        // particle dot
+        noStroke();
+        fill(r, g, b, lifeRatio * 210);
+        ellipse(this.x, this.y, 4, 4);
+    }
+}
+
+// ─── Connection arc management ─────────────────────────────────────
+
+function _key(a, b) {
+    let ia = nodes.indexOf(a), ib = nodes.indexOf(b);
+    return ia < ib ? `${ia}-${ib}` : `${ib}-${ia}`;
+}
+
+let connectionMap = {}; // key → index into connections[]
+
+function _reinforce(a, b) {
+    let k = _key(a, b);
+    if (connectionMap[k] !== undefined) {
+        connections[connectionMap[k]].strength = min(connections[connectionMap[k]].strength + 0.04, 1.0);
+    } else {
+        // compute Bézier control point perpendicular to midpoint — fixed at birth
+        let mx = (a.x + b.x) / 2;
+        let my = (a.y + b.y) / 2;
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let len = sqrt(dx * dx + dy * dy);
+        let nx = -dy / len, ny = dx / len;
+        // random signed perpendicular offset (30–100px), seeded at creation
+        let offset = (noise(a.x * 0.003, b.y * 0.003) - 0.5) * 160;
+        let cp = { x: mx + nx * offset, y: my + ny * offset };
+        connections.push({ a, b, strength: 0.15, cp });
+        connectionMap[k] = connections.length - 1;
+    }
+}
+
+function drawConnections() {
+    for (let c of connections) {
+        if (c.strength < 0.01) continue;
+        let [r, g, b] = c.a.type.rgb;
+        let alpha = c.strength * 160;
+        let w = c.strength * 1.8;
+        stroke(r, g, b, alpha);
+        strokeWeight(w);
+        noFill();
+        beginShape();
+        vertex(c.a.x, c.a.y);
+        quadraticVertex(c.cp.x, c.cp.y, c.b.x, c.b.y);
+        endShape();
+
+        // faint secondary glow
+        stroke(r, g, b, alpha * 0.3);
+        strokeWeight(w + 3);
+        beginShape();
+        vertex(c.a.x, c.a.y);
+        quadraticVertex(c.cp.x, c.cp.y, c.b.x, c.b.y);
+        endShape();
+    }
+}
+
+function decayConnections() {
+    for (let c of connections) {
+        c.strength -= params.decayRate * 0.4;
+    }
+}
+
+// ─── System init ────────────────────────────────────────────────────
+
+function initializeSystem() {
+    randomSeed(params.seed);
+    noiseSeed(params.seed);
+    noiseZ = 0;
+    nodes = [];
+    particles = [];
+    connections = [];
+    connectionMap = {};
+
+    // Place memory nodes in a pseudo-organic scatter (avoid edges)
+    let margin = 120;
+    for (let i = 0; i < params.nodeCount; i++) {
+        let attempts = 0;
+        let x, y, ok;
+        do {
+            x = random(margin, width - margin);
+            y = random(margin, height - margin);
+            ok = true;
+            // keep minimum spacing between nodes
+            for (let n of nodes) {
+                let d = dist(x, y, n.x, n.y);
+                if (d < 130) { ok = false; break; }
+            }
+            attempts++;
+        } while (!ok && attempts < 60);
+        let typeIdx = i % TYPES.length;
+        nodes.push(new MemoryNode(x, y, typeIdx));
+    }
+}
+
+// ─── p5 lifecycle ───────────────────────────────────────────────────
+
+function setup() {
+    let canvas = createCanvas(1200, 1200);
+    canvas.parent('canvas-container');
+    document.querySelector('.loading').style.display = 'none';
+    initializeSystem();
+    background(13, 14, 17);
+}
+
+function draw() {
+    // semi-transparent overlay for trail fade
+    fill(13, 14, 17, 18);
+    noStroke();
+    rect(0, 0, width, height);
+
+    // spawn particles up to density cap
+    let maxParticles = params.particleDensity * 4;
+    if (particles.length < maxParticles && frameCount % 2 === 0) {
+        particles.push(new KnowledgeParticle());
+    }
+
+    // decay connections
+    decayConnections();
+
+    // draw connections
+    drawConnections();
+
+    // update + draw nodes
+    for (let n of nodes) {
+        n.update();
+        n.draw();
+    }
+
+    // update + draw particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update();
+        particles[i].draw();
+        if (particles[i].dead) particles.splice(i, 1);
+    }
+
+    noiseZ += 0.0004;
+}
+
+// ─── UI handlers ────────────────────────────────────────────────────
+
+function updateParam(name, value) {
+    params[name] = value;
+    document.getElementById(name + '-value').textContent = value;
+    // nodeCount change requires full reinit
+    if (name === 'nodeCount') {
+        initializeSystem();
+        background(13, 14, 17);
+    }
+}
+
+function updateSeedDisplay() {
+    document.getElementById('seed-input').value = params.seed;
+}
+
+function updateSeed() {
+    let v = parseInt(document.getElementById('seed-input').value);
+    if (v > 0) { params.seed = v; initializeSystem(); background(13, 14, 17); }
+    else updateSeedDisplay();
+}
+
+function previousSeed() { params.seed = Math.max(1, params.seed - 1); updateSeedDisplay(); initializeSystem(); background(13, 14, 17); }
+function nextSeed()     { params.seed += 1; updateSeedDisplay(); initializeSystem(); background(13, 14, 17); }
+function randomSeedAndUpdate() { params.seed = Math.floor(Math.random() * 99999) + 1; updateSeedDisplay(); initializeSystem(); background(13, 14, 17); }
+
+function resetParameters() {
+    params = { ...defaultParams };
+    ['nodeCount','particleDensity','driftSpeed','connectionRadius','noiseScale','decayRate'].forEach(k => {
+        document.getElementById(k).value = params[k];
+        document.getElementById(k + '-value').textContent = params[k];
+    });
+    updateSeedDisplay();
+    initializeSystem();
+    background(13, 14, 17);
+}
+
+function downloadCanvas() {
+    saveCanvas('semantic-gravity-' + params.seed, 'png');
+}
+
+window.addEventListener('load', updateSeedDisplay);
+</script>
+</body>
+</html>
