@@ -5,203 +5,267 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image → Algorithmic Art</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --anthropic-dark: #141413;
-            --anthropic-light: #faf9f5;
-            --anthropic-mid-gray: #b0aea5;
-            --anthropic-light-gray: #e8e6dc;
-            --anthropic-orange: #d97757;
-            --anthropic-blue: #6a9bcc;
-            --anthropic-green: #788c5d;
+            --dark: #141413; --light: #faf9f5; --gray: #b0aea5;
+            --lgray: #e8e6dc; --orange: #d97757; --blue: #6a9bcc; --green: #788c5d;
         }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, var(--anthropic-light) 0%, #f5f3ee 100%); min-height: 100vh; color: var(--anthropic-dark); }
-        .container { display: flex; min-height: 100vh; padding: 20px; gap: 20px; }
-        .sidebar { width: 300px; flex-shrink: 0; background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); padding: 24px; border-radius: 12px; box-shadow: 0 10px 30px rgba(20,20,19,0.1); overflow-y: auto; }
-        .sidebar h1 { font-family: 'Lora', serif; font-size: 20px; font-weight: 500; margin-bottom: 6px; }
-        .sidebar .subtitle { color: var(--anthropic-mid-gray); font-size: 12px; margin-bottom: 24px; line-height: 1.5; }
-        .control-section { margin-bottom: 24px; }
-        .control-section h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--anthropic-mid-gray); }
-        .control-section h3::before { content: '•'; color: var(--anthropic-orange); font-size: 16px; }
-        .drop-zone { border: 2px dashed var(--anthropic-light-gray); border-radius: 10px; padding: 20px 12px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--anthropic-light); margin-bottom: 10px; }
-        .drop-zone:hover, .drop-zone.drag-over { border-color: var(--anthropic-orange); background: rgba(217,119,87,0.04); }
-        .drop-zone .icon { font-size: 24px; margin-bottom: 6px; }
-        .drop-zone .label { font-size: 12px; color: var(--anthropic-mid-gray); }
-        .drop-zone .label span { color: var(--anthropic-orange); font-weight: 500; }
-        #file-input { display: none; }
-        .thumb-container { width: 100%; border-radius: 6px; overflow: hidden; margin-bottom: 8px; display: none; }
-        .thumb-container img { width: 100%; display: block; }
-        .seed-input { width: 100%; background: var(--anthropic-light); padding: 10px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 14px; margin-bottom: 10px; border: 1px solid var(--anthropic-light-gray); text-align: center; }
-        .seed-input:focus { outline: none; border-color: var(--anthropic-orange); }
-        .seed-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-        .control-group { margin-bottom: 14px; }
-        .control-group label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 5px; }
-        .slider-container { display: flex; align-items: center; gap: 10px; }
-        .slider-container input[type="range"] { flex: 1; height: 4px; background: var(--anthropic-light-gray); border-radius: 2px; outline: none; -webkit-appearance: none; }
-        .slider-container input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--anthropic-orange); border-radius: 50%; cursor: pointer; }
-        .slider-container input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; background: var(--anthropic-orange); border-radius: 50%; border: none; cursor: pointer; }
-        .value-display { font-family: 'Courier New', monospace; font-size: 11px; color: var(--anthropic-mid-gray); min-width: 40px; text-align: right; }
-        .button { background: var(--anthropic-orange); color: white; border: none; padding: 9px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; width: 100%; }
-        .button:hover { background: #c86641; transform: translateY(-1px); }
-        .button.secondary { background: var(--anthropic-blue); }
-        .button.secondary:hover { background: #5a8bb8; }
-        .button.tertiary { background: var(--anthropic-green); }
-        .button.tertiary:hover { background: #6b7b52; }
-        .button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-        .button-row { display: flex; gap: 8px; }
-        .button-row .button { flex: 1; }
-        .status { font-size: 11px; color: var(--anthropic-mid-gray); text-align: center; margin-top: 6px; min-height: 16px; }
-        .canvas-area { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
-        #canvas-container { width: 100%; max-width: 960px; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 40px rgba(20,20,19,0.15); background: #111; }
-        #canvas-container canvas { display: block; width: 100% !important; height: auto !important; }
-        .loading-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 40px; gap: 12px; }
-        .loading-panel .hint { font-size: 14px; color: #888; font-family: 'Poppins', sans-serif; text-align: center; line-height: 1.5; }
-        .loading-panel .hint span { color: var(--anthropic-orange); }
-        @media (max-width: 700px) { .container { flex-direction: column; } .sidebar { width: 100%; } }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Poppins',sans-serif; background:linear-gradient(135deg,var(--light) 0%,#f0ede6 100%); min-height:100vh; color:var(--dark); }
+        .container { display:flex; min-height:100vh; padding:16px; gap:16px; }
+
+        /* ── Sidebar ── */
+        .sidebar { width:280px; flex-shrink:0; background:rgba(255,255,255,0.97); border-radius:12px; box-shadow:0 8px 30px rgba(20,20,19,0.1); overflow-y:auto; display:flex; flex-direction:column; }
+        .sidebar-inner { padding:20px; flex:1; }
+        .sidebar h1 { font-family:'Lora',serif; font-size:19px; font-weight:500; margin-bottom:4px; }
+        .subtitle { color:var(--gray); font-size:11px; margin-bottom:20px; line-height:1.5; }
+        .section { margin-bottom:20px; }
+        .section-title { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--gray); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+        .section-title::before { content:''; width:12px; height:2px; background:var(--orange); border-radius:1px; }
+
+        /* Drop zone */
+        .drop-zone { border:2px dashed var(--lgray); border-radius:10px; padding:18px 12px; text-align:center; cursor:pointer; transition:all .2s; background:var(--light); }
+        .drop-zone:hover,.drop-zone.drag-over { border-color:var(--orange); background:rgba(217,119,87,.04); }
+        .drop-zone .dz-icon { font-size:22px; margin-bottom:5px; }
+        .drop-zone .dz-label { font-size:11px; color:var(--gray); }
+        .drop-zone .dz-label span { color:var(--orange); font-weight:500; }
+        #file-input { display:none; }
+        .thumb-wrap { position:relative; border-radius:8px; overflow:hidden; margin-top:10px; display:none; cursor:pointer; }
+        .thumb-wrap img { width:100%; display:block; }
+        .thumb-overlay { position:absolute; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .2s; font-size:11px; color:#fff; font-weight:500; letter-spacing:.04em; }
+        .thumb-wrap:hover .thumb-overlay { opacity:1; }
+
+        /* Palette swatches */
+        .palette-row { display:flex; gap:4px; margin-top:8px; }
+        .swatch { flex:1; height:18px; border-radius:3px; transition:transform .15s; cursor:pointer; }
+        .swatch:hover { transform:scaleY(1.4); }
+
+        /* Style presets */
+        .preset-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+        .preset-btn { border:2px solid var(--lgray); border-radius:8px; padding:8px 4px; text-align:center; cursor:pointer; transition:all .2s; background:white; font-size:10px; font-weight:500; color:var(--dark); }
+        .preset-btn:hover { border-color:var(--orange); color:var(--orange); }
+        .preset-btn.active { border-color:var(--orange); background:rgba(217,119,87,.08); color:var(--orange); }
+        .preset-btn .preset-icon { font-size:18px; display:block; margin-bottom:3px; }
+
+        /* Sliders */
+        .ctrl { margin-bottom:12px; }
+        .ctrl label { display:flex; justify-content:space-between; font-size:11px; font-weight:500; margin-bottom:4px; }
+        .ctrl label span { font-family:'Courier New',monospace; color:var(--gray); font-size:10px; }
+        input[type=range] { width:100%; height:3px; background:var(--lgray); border-radius:2px; outline:none; -webkit-appearance:none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; background:var(--orange); border-radius:50%; cursor:pointer; }
+        input[type=range]::-moz-range-thumb { width:13px; height:13px; background:var(--orange); border-radius:50%; border:none; cursor:pointer; }
+
+        /* Seed */
+        .seed-row { display:flex; gap:6px; margin-bottom:8px; }
+        .seed-input { flex:1; background:var(--light); padding:7px 10px; border-radius:6px; font-family:'Courier New',monospace; font-size:13px; border:1px solid var(--lgray); text-align:center; }
+        .seed-input:focus { outline:none; border-color:var(--orange); }
+
+        /* Buttons */
+        .btn { border:none; padding:8px 12px; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all .2s; width:100%; color:white; }
+        .btn:hover { transform:translateY(-1px); }
+        .btn:active { transform:translateY(0); }
+        .btn-orange { background:var(--orange); }
+        .btn-orange:hover { background:#c86641; }
+        .btn-blue { background:var(--blue); }
+        .btn-blue:hover { background:#5a8bb8; }
+        .btn-green { background:var(--green); }
+        .btn-green:hover { background:#6b7b52; }
+        .btn-dark { background:#2a2a28; }
+        .btn-dark:hover { background:#1a1a18; }
+        .btn:disabled { opacity:.35; cursor:not-allowed; transform:none; }
+        .btn-row { display:flex; gap:6px; }
+        .btn-row .btn { flex:1; }
+
+        /* Progress */
+        .progress-wrap { margin-top:10px; display:none; }
+        .progress-bar { height:3px; background:var(--lgray); border-radius:2px; overflow:hidden; }
+        .progress-fill { height:100%; background:linear-gradient(90deg,var(--orange),var(--blue)); border-radius:2px; width:0%; transition:width .1s; }
+        .progress-label { font-size:10px; color:var(--gray); margin-top:4px; text-align:center; }
+
+        /* Status */
+        .status { font-size:10px; color:var(--gray); text-align:center; margin-top:6px; min-height:14px; }
+
+        /* ── Canvas area ── */
+        .canvas-area { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:0; gap:12px; }
+        .canvas-wrap { position:relative; width:100%; max-width:900px; border-radius:14px; overflow:hidden; box-shadow:0 24px 50px rgba(20,20,19,0.18); background:#111; }
+        .canvas-wrap canvas { display:block; width:100%!important; height:auto!important; }
+        .before-after-overlay { position:absolute; inset:0; display:none; }
+        .before-after-overlay img { width:100%; height:100%; object-fit:cover; }
+
+        .canvas-toolbar { display:flex; gap:8px; align-items:center; }
+        .tool-btn { border:none; background:rgba(255,255,255,0.9); color:var(--dark); padding:7px 14px; border-radius:20px; font-size:11px; font-weight:500; cursor:pointer; transition:all .2s; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+        .tool-btn:hover { background:white; transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.12); }
+        .tool-btn.active { background:var(--orange); color:white; }
+
+        .loading-panel { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:80px 40px; gap:14px; }
+        .loading-panel .hint { font-size:14px; color:#888; text-align:center; line-height:1.6; }
+        .loading-panel .hint span { color:var(--orange); }
+
+        @media(max-width:700px) { .container { flex-direction:column; } .sidebar { width:100%; } }
     </style>
 </head>
 <body>
 <div class="container">
-    <div class="sidebar">
-        <h1>Image → Art</h1>
-        <div class="subtitle">Particles are born on the image's edges and follow its contours, sampling colors from each position they pass through.</div>
+  <div class="sidebar">
+    <div class="sidebar-inner">
+      <h1>Image → Art</h1>
+      <div class="subtitle">Particles trace your image's structure. Each style transforms how they move and paint.</div>
 
-        <div class="control-section">
-            <h3>Source Image</h3>
-            <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
-                <div class="icon">🖼️</div>
-                <div class="label">Drop or <span>click to browse</span></div>
-            </div>
-            <input type="file" id="file-input" accept="image/*" onchange="handleFileSelect(event)">
-            <div class="thumb-container" id="thumb-container"><img id="thumb" src="" alt=""></div>
-            <div class="status" id="status">No image loaded</div>
+      <!-- Upload -->
+      <div class="section">
+        <div class="section-title">Source Image</div>
+        <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+          <div class="dz-icon">🖼️</div>
+          <div class="dz-label">Drop or <span>click to browse</span></div>
         </div>
-
-        <div class="control-section">
-            <h3>Seed</h3>
-            <input type="number" id="seed-input" class="seed-input" value="42" onchange="updateSeed()">
-            <div class="seed-controls">
-                <button class="button secondary" onclick="previousSeed()">← Prev</button>
-                <button class="button secondary" onclick="nextSeed()">Next →</button>
-            </div>
-            <button class="button tertiary" onclick="randomSeedAndUpdate()">↻ Random</button>
+        <input type="file" id="file-input" accept="image/*" onchange="handleFileSelect(event)">
+        <div class="thumb-wrap" id="thumb-wrap" onclick="toggleBeforeAfter()">
+          <img id="thumb" src="" alt="">
+          <div class="thumb-overlay">Click to compare</div>
         </div>
+        <div class="palette-row" id="palette-row"></div>
+        <div class="status" id="status">No image loaded</div>
+      </div>
 
-        <div class="control-section">
-            <h3>Parameters</h3>
-
-            <div class="control-group">
-                <label>Stroke Density</label>
-                <div class="slider-container">
-                    <input type="range" id="strokeDensity" min="500" max="8000" step="100" value="3000" oninput="updateParam('strokeDensity', parseInt(this.value))">
-                    <span class="value-display" id="strokeDensity-value">3000</span>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>Stroke Length</label>
-                <div class="slider-container">
-                    <input type="range" id="strokeLength" min="10" max="120" step="5" value="75" oninput="updateParam('strokeLength', parseInt(this.value))">
-                    <span class="value-display" id="strokeLength-value">40</span>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>Edge Bias</label>
-                <div class="slider-container">
-                    <input type="range" id="edgeBias" min="0.0" max="1.0" step="0.05" value="0.5" oninput="updateParam('edgeBias', parseFloat(this.value))">
-                    <span class="value-display" id="edgeBias-value">0.75</span>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>Stroke Curvature</label>
-                <div class="slider-container">
-                    <input type="range" id="curvature" min="0.0" max="1.0" step="0.05" value="0.3" oninput="updateParam('curvature', parseFloat(this.value))">
-                    <span class="value-display" id="curvature-value">0.50</span>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>Stroke Width</label>
-                <div class="slider-container">
-                    <input type="range" id="strokeWidth" min="0.3" max="3.0" step="0.1" value="1.4" oninput="updateParam('strokeWidth', parseFloat(this.value))">
-                    <span class="value-display" id="strokeWidth-value">1.0</span>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>Brightness Boost</label>
-                <div class="slider-container">
-                    <input type="range" id="brightnessBoost" min="0.5" max="2.5" step="0.1" value="1.3" oninput="updateParam('brightnessBoost', parseFloat(this.value))">
-                    <span class="value-display" id="brightnessBoost-value">1.3</span>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>Background</label>
-                <div class="slider-container">
-                    <input type="range" id="bgLightness" min="0" max="50" step="1" value="8" oninput="updateParam('bgLightness', parseInt(this.value))">
-                    <span class="value-display" id="bgLightness-value">8</span>
-                </div>
-            </div>
+      <!-- Style presets -->
+      <div class="section">
+        <div class="section-title">Style</div>
+        <div class="preset-grid">
+          <div class="preset-btn active" data-preset="oil" onclick="setPreset('oil')"><span class="preset-icon">🎨</span>Oil Paint</div>
+          <div class="preset-btn" data-preset="ink" onclick="setPreset('ink')"><span class="preset-icon">🖋️</span>Ink Sketch</div>
+          <div class="preset-btn" data-preset="watercolor" onclick="setPreset('watercolor')"><span class="preset-icon">💧</span>Watercolor</div>
+          <div class="preset-btn" data-preset="pointillist" onclick="setPreset('pointillist')"><span class="preset-icon">✦</span>Pointillist</div>
+          <div class="preset-btn" data-preset="neon" onclick="setPreset('neon')"><span class="preset-icon">⚡</span>Neon</div>
+          <div class="preset-btn" data-preset="pencil" onclick="setPreset('pencil')"><span class="preset-icon">✏️</span>Pencil</div>
         </div>
+      </div>
 
-        <div class="control-section">
-            <h3>Actions</h3>
-            <div class="button-row">
-                <button class="button" onclick="resetAndRedraw()">Redraw</button>
-                <button class="button secondary" id="btn-save" onclick="downloadCanvas()" disabled>Save PNG</button>
-            </div>
+      <!-- Seed -->
+      <div class="section">
+        <div class="section-title">Seed</div>
+        <div class="seed-row">
+          <button class="btn btn-blue" style="flex:0 0 36px;padding:0" onclick="previousSeed()">←</button>
+          <input type="number" id="seed-input" class="seed-input" value="42" onchange="updateSeed()">
+          <button class="btn btn-blue" style="flex:0 0 36px;padding:0" onclick="nextSeed()">→</button>
         </div>
+        <button class="btn btn-green" onclick="randomSeedAndUpdate()">↻ Random</button>
+      </div>
+
+      <!-- Fine-tune -->
+      <div class="section">
+        <div class="section-title">Fine-tune</div>
+        <div class="ctrl"><label>Stroke Density <span id="v-strokeDensity">4000</span></label>
+          <input type="range" id="strokeDensity" min="500" max="12000" step="100" value="4000" oninput="updateParam('strokeDensity',+this.value)"></div>
+        <div class="ctrl"><label>Stroke Length <span id="v-strokeLength">75</span></label>
+          <input type="range" id="strokeLength" min="5" max="150" step="5" value="75" oninput="updateParam('strokeLength',+this.value)"></div>
+        <div class="ctrl"><label>Edge Bias <span id="v-edgeBias">0.50</span></label>
+          <input type="range" id="edgeBias" min="0" max="1" step="0.05" value="0.5" oninput="updateParam('edgeBias',+this.value)"></div>
+        <div class="ctrl"><label>Curvature <span id="v-curvature">0.30</span></label>
+          <input type="range" id="curvature" min="0" max="1" step="0.05" value="0.3" oninput="updateParam('curvature',+this.value)"></div>
+        <div class="ctrl"><label>Stroke Width <span id="v-strokeWidth">1.4</span></label>
+          <input type="range" id="strokeWidth" min="0.2" max="5" step="0.1" value="1.4" oninput="updateParam('strokeWidth',+this.value)"></div>
+        <div class="ctrl"><label>Brightness <span id="v-brightnessBoost">1.30</span></label>
+          <input type="range" id="brightnessBoost" min="0.5" max="3" step="0.05" value="1.3" oninput="updateParam('brightnessBoost',+this.value)"></div>
+        <div class="ctrl"><label>Background <span id="v-bgLightness">8</span></label>
+          <input type="range" id="bgLightness" min="0" max="255" step="1" value="8" oninput="updateParam('bgLightness',+this.value)"></div>
+        <div class="ctrl"><label>Detail Layers <span id="v-layers">2</span></label>
+          <input type="range" id="layers" min="1" max="4" step="1" value="2" oninput="updateParam('layers',+this.value)"></div>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-label" id="progress-label">Rendering…</div>
+      </div>
+
+      <!-- Actions -->
+      <div class="section">
+        <div class="section-title">Actions</div>
+        <div class="btn-row" style="margin-bottom:6px">
+          <button class="btn btn-orange" onclick="startRender()">▶ Render</button>
+          <button class="btn btn-dark" id="btn-save" onclick="downloadCanvas()" disabled>⬇ Save</button>
+        </div>
+        <button class="btn btn-blue" onclick="resetParameters()">Reset Defaults</button>
+      </div>
     </div>
+  </div>
 
-    <div class="canvas-area">
-        <div id="canvas-container">
-            <div class="loading-panel" id="loading-panel">
-                <div style="font-size:44px">🌿</div>
-                <div class="hint">Drop an image to begin.<br><span>Particles will trace its structure.</span></div>
-            </div>
-        </div>
+  <!-- Canvas -->
+  <div class="canvas-area">
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="loading-panel" id="loading-panel">
+        <div style="font-size:48px">🌿</div>
+        <div class="hint">Drop an image to begin.<br><span>Particles will trace its structure.</span></div>
+      </div>
+      <div class="before-after-overlay" id="ba-overlay">
+        <img id="ba-img" src="" alt="">
+      </div>
     </div>
+    <div class="canvas-toolbar">
+      <button class="tool-btn" id="btn-ba" onclick="toggleBeforeAfter()" disabled>Before / After</button>
+      <button class="tool-btn" onclick="exportHiRes()" id="btn-hires" disabled>Export 2×</button>
+    </div>
+  </div>
 </div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// IMAGE → ALGORITHMIC ART
-//
-// Core idea: particles spawn ON the image's edges (weighted by Sobel
-// magnitude), orient along the gradient, and sample color from their
-// current position as they move. The output looks like a painterly
-// rendering of the source — contours visible, colors faithful.
+// STYLE PRESETS — each fully overrides the parameter set
 // ═══════════════════════════════════════════════════════════════════
-
-let params = {
-    seed: 42,
-    strokeDensity: 3000,
-    strokeLength: 75,
-    edgeBias: 0.5,
-    curvature: 0.3,
-    strokeWidth: 1.4,
-    brightnessBoost: 1.3,
-    bgLightness: 8,
+const PRESETS = {
+    oil: {
+        strokeDensity:5000, strokeLength:80, edgeBias:0.45, curvature:0.35,
+        strokeWidth:2.2, brightnessBoost:1.4, bgLightness:10, layers:3,
+        stepSize:2.2, alphaScale:1.0, dotMode:false, inkMode:false,
+        neonMode:false, waterMode:false,
+    },
+    ink: {
+        strokeDensity:6000, strokeLength:60, edgeBias:0.85, curvature:0.2,
+        strokeWidth:0.9, brightnessBoost:0.0, bgLightness:245, layers:2,
+        stepSize:1.8, alphaScale:1.2, dotMode:false, inkMode:true,
+        neonMode:false, waterMode:false,
+    },
+    watercolor: {
+        strokeDensity:4000, strokeLength:100, edgeBias:0.3, curvature:0.65,
+        strokeWidth:3.5, brightnessBoost:1.6, bgLightness:235, layers:3,
+        stepSize:3.0, alphaScale:0.55, dotMode:false, inkMode:false,
+        neonMode:false, waterMode:true,
+    },
+    pointillist: {
+        strokeDensity:9000, strokeLength:1, edgeBias:0.4, curvature:0,
+        strokeWidth:3.5, brightnessBoost:1.5, bgLightness:12, layers:1,
+        stepSize:1, alphaScale:1.0, dotMode:true, inkMode:false,
+        neonMode:false, waterMode:false,
+    },
+    neon: {
+        strokeDensity:4000, strokeLength:90, edgeBias:0.7, curvature:0.5,
+        strokeWidth:1.2, brightnessBoost:2.8, bgLightness:4, layers:2,
+        stepSize:2.0, alphaScale:1.1, dotMode:false, inkMode:false,
+        neonMode:true, waterMode:false,
+    },
+    pencil: {
+        strokeDensity:8000, strokeLength:45, edgeBias:0.8, curvature:0.15,
+        strokeWidth:0.6, brightnessBoost:0.0, bgLightness:250, layers:2,
+        stepSize:1.5, alphaScale:1.3, dotMode:false, inkMode:true,
+        neonMode:false, waterMode:false,
+    },
 };
-const defaultParams = { ...params };
 
+let currentPreset = 'oil';
+let params = { seed:42, ...PRESETS.oil };
 let sourceImg = null;
-let sobelMag = null;     // Float32Array — normalized [0,1] magnitude
-let sobelAngle = null;   // Float32Array — gradient angle at each pixel
-let spawnCDF = null;     // cumulative distribution for edge-weighted spawn
+let sobelMag = null, sobelAngle = null, spawnCDF = null;
 let iw = 0, ih = 0;
 let p5inst = null;
-let drawing = false;
+let rendering = false;
+let renderProgress = 0;
+let totalStrokes = 0;
+let drawnStrokes = 0;
+let showingBefore = false;
+let hiResBuffer = null;
 
-// ─── Drag & drop ────────────────────────────────────────────────────
-
+// ─── Drag & drop ─────────────────────────────────────────────────────
 const dropZone = document.getElementById('drop-zone');
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
@@ -212,212 +276,358 @@ function loadImageFile(file) {
     setStatus('Loading…');
     const reader = new FileReader();
     reader.onload = ev => {
-        const dataURL = ev.target.result;
-        document.getElementById('thumb').src = dataURL;
-        document.getElementById('thumb-container').style.display = 'block';
-        p5inst.loadImage(dataURL, img => {
-            sourceImg = img;
-            iw = img.width; ih = img.height;
+        const url = ev.target.result;
+        document.getElementById('thumb').src = url;
+        document.getElementById('ba-img').src = url;
+        document.getElementById('thumb-wrap').style.display = 'block';
+        p5inst.loadImage(url, img => {
+            sourceImg = img; iw = img.width; ih = img.height;
             buildSobel();
-            resetAndRedraw();
-            setStatus(`${iw}×${ih} — ${file.name}`);
+            extractPalette();
+            setStatus(`${iw}×${ih} px`);
             document.getElementById('loading-panel').style.display = 'none';
+            document.getElementById('btn-ba').disabled = false;
+            document.getElementById('btn-hires').disabled = false;
             document.getElementById('btn-save').disabled = false;
-        }, () => setStatus('Failed to load image'));
+            startRender();
+        }, () => setStatus('Load failed'));
     };
     reader.readAsDataURL(file);
 }
 
 function setStatus(m) { document.getElementById('status').textContent = m; }
 
-// ─── Sobel edge detection ────────────────────────────────────────────
-
+// ─── Sobel ────────────────────────────────────────────────────────────
 function buildSobel() {
     sourceImg.loadPixels();
     const gray = new Float32Array(iw * ih);
-    for (let i = 0; i < iw * ih; i++) {
-        const px = i * 4;
-        gray[i] = (sourceImg.pixels[px]*0.299 + sourceImg.pixels[px+1]*0.587 + sourceImg.pixels[px+2]*0.114) / 255;
+    for (let i = 0; i < iw*ih; i++) {
+        const px = i*4;
+        gray[i] = (sourceImg.pixels[px]*.299 + sourceImg.pixels[px+1]*.587 + sourceImg.pixels[px+2]*.114)/255;
     }
-    sobelMag = new Float32Array(iw * ih);
-    sobelAngle = new Float32Array(iw * ih);
+    sobelMag = new Float32Array(iw*ih);
+    sobelAngle = new Float32Array(iw*ih);
     let maxMag = 0;
-    const g = (x, y) => gray[Math.min(Math.max(y,0),ih-1)*iw + Math.min(Math.max(x,0),iw-1)];
-    for (let y = 0; y < ih; y++) {
-        for (let x = 0; x < iw; x++) {
-            const gx = -g(x-1,y-1) - 2*g(x-1,y) - g(x-1,y+1) + g(x+1,y-1) + 2*g(x+1,y) + g(x+1,y+1);
-            const gy = -g(x-1,y-1) - 2*g(x,y-1) - g(x+1,y-1) + g(x-1,y+1) + 2*g(x,y+1) + g(x+1,y+1);
-            const mag = Math.sqrt(gx*gx + gy*gy);
-            sobelMag[y*iw+x] = mag;
-            sobelAngle[y*iw+x] = Math.atan2(gy, gx);
-            if (mag > maxMag) maxMag = mag;
-        }
+    const g = (x,y) => gray[Math.min(Math.max(y,0),ih-1)*iw + Math.min(Math.max(x,0),iw-1)];
+    for (let y=0; y<ih; y++) for (let x=0; x<iw; x++) {
+        const gx = -g(x-1,y-1)-2*g(x-1,y)-g(x-1,y+1)+g(x+1,y-1)+2*g(x+1,y)+g(x+1,y+1);
+        const gy = -g(x-1,y-1)-2*g(x,y-1)-g(x+1,y-1)+g(x-1,y+1)+2*g(x,y+1)+g(x+1,y+1);
+        const mag = Math.sqrt(gx*gx+gy*gy);
+        sobelMag[y*iw+x] = mag;
+        sobelAngle[y*iw+x] = Math.atan2(gy,gx);
+        if (mag>maxMag) maxMag = mag;
     }
-    if (maxMag > 0) for (let i = 0; i < sobelMag.length; i++) sobelMag[i] /= maxMag;
-
-    // Build CDF for edge-weighted random spawn
-    // Mix edge weight with uniform so flat areas still get some particles
-    spawnCDF = new Float32Array(iw * ih);
-    let sum = 0;
-    for (let i = 0; i < sobelMag.length; i++) {
-        sum += sobelMag[i] * params.edgeBias + (1 - params.edgeBias);
-    }
-    let acc = 0;
-    for (let i = 0; i < sobelMag.length; i++) {
-        acc += (sobelMag[i] * params.edgeBias + (1 - params.edgeBias)) / sum;
-        spawnCDF[i] = acc;
-    }
+    if (maxMag>0) for (let i=0; i<sobelMag.length; i++) sobelMag[i] /= maxMag;
+    rebuildCDF();
 }
 
-// Binary search into CDF to sample an edge-weighted pixel index
+function rebuildCDF() {
+    spawnCDF = new Float32Array(iw*ih);
+    let sum = 0;
+    for (let i=0; i<sobelMag.length; i++) sum += sobelMag[i]*params.edgeBias + (1-params.edgeBias);
+    let acc = 0;
+    for (let i=0; i<sobelMag.length; i++) { acc += (sobelMag[i]*params.edgeBias+(1-params.edgeBias))/sum; spawnCDF[i]=acc; }
+}
+
 function sampleEdgePixel() {
     const r = Math.random();
-    let lo = 0, hi = spawnCDF.length - 1;
-    while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (spawnCDF[mid] < r) lo = mid + 1; else hi = mid;
-    }
+    let lo=0, hi=spawnCDF.length-1;
+    while (lo<hi) { const mid=(lo+hi)>>1; if (spawnCDF[mid]<r) lo=mid+1; else hi=mid; }
     return lo;
 }
 
-// ─── Color sampling from source image ───────────────────────────────
+// ─── Color extraction (k-means lite) ─────────────────────────────────
+function extractPalette() {
+    sourceImg.loadPixels();
+    const step = Math.max(1, Math.floor(iw*ih / 400));
+    const samples = [];
+    for (let i=0; i<iw*ih; i+=step) {
+        const px=i*4;
+        samples.push([sourceImg.pixels[px], sourceImg.pixels[px+1], sourceImg.pixels[px+2]]);
+    }
+    // Simple median-cut: sort by most-varying channel, split, take medians of 6 buckets
+    const palette = medianCut(samples, 6);
+    const row = document.getElementById('palette-row');
+    row.innerHTML = '';
+    palette.forEach(([r,g,b]) => {
+        const s = document.createElement('div');
+        s.className = 'swatch';
+        s.style.background = `rgb(${r},${g},${b})`;
+        s.title = `rgb(${r},${g},${b})`;
+        row.appendChild(s);
+    });
+}
 
+function medianCut(pixels, n) {
+    if (pixels.length === 0 || n <= 0) return [];
+    let buckets = [pixels];
+    while (buckets.length < n) {
+        // Split the largest bucket along its widest channel
+        buckets.sort((a,b) => b.length - a.length);
+        const bucket = buckets.shift();
+        const ranges = [0,1,2].map(ch => {
+            const vals = bucket.map(p=>p[ch]);
+            return Math.max(...vals)-Math.min(...vals);
+        });
+        const ch = ranges.indexOf(Math.max(...ranges));
+        bucket.sort((a,b)=>a[ch]-b[ch]);
+        const mid = Math.floor(bucket.length/2);
+        buckets.push(bucket.slice(0,mid), bucket.slice(mid));
+    }
+    return buckets.map(b => {
+        const avg = [0,0,0];
+        b.forEach(p => { avg[0]+=p[0]; avg[1]+=p[1]; avg[2]+=p[2]; });
+        return avg.map(v=>Math.round(v/b.length));
+    });
+}
+
+// ─── Color + angle sampling ───────────────────────────────────────────
 function sampleColor(cx, cy) {
-    // Map canvas coords → image coords
-    const ix = Math.min(Math.max(Math.round(cx / p5inst.width * iw), 0), iw - 1);
-    const iy = Math.min(Math.max(Math.round(cy / p5inst.height * ih), 0), ih - 1);
-    const px = (iy * iw + ix) * 4;
+    const ix = Math.min(Math.max(Math.round(cx/p5inst.width*iw),0),iw-1);
+    const iy = Math.min(Math.max(Math.round(cy/p5inst.height*ih),0),ih-1);
+    const px = (iy*iw+ix)*4;
+    const boost = params.inkMode ? 0 : params.brightnessBoost;
     return [
-        Math.min(sourceImg.pixels[px]   * params.brightnessBoost, 255),
-        Math.min(sourceImg.pixels[px+1] * params.brightnessBoost, 255),
-        Math.min(sourceImg.pixels[px+2] * params.brightnessBoost, 255),
+        Math.min((sourceImg.pixels[px]||0)*boost, 255),
+        Math.min((sourceImg.pixels[px+1]||0)*boost, 255),
+        Math.min((sourceImg.pixels[px+2]||0)*boost, 255),
     ];
 }
 
-// ─── Flow angle at canvas position ──────────────────────────────────
-// Perpendicular to Sobel gradient = follows edge contours
-
-function flowAngle(cx, cy) {
-    const ix = Math.min(Math.max(Math.round(cx / p5inst.width * iw), 0), iw - 1);
-    const iy = Math.min(Math.max(Math.round(cy / p5inst.height * ih), 0), ih - 1);
-    const gradAngle = sobelAngle[iy * iw + ix];
-    // Perpendicular to gradient = along the edge
-    return gradAngle + Math.PI / 2;
+function getFlowAngle(cx, cy) {
+    const ix = Math.min(Math.max(Math.round(cx/p5inst.width*iw),0),iw-1);
+    const iy = Math.min(Math.max(Math.round(cy/p5inst.height*ih),0),ih-1);
+    return sobelAngle[iy*iw+ix] + Math.PI/2;
 }
 
-// ─── Draw one stroke ─────────────────────────────────────────────────
-// A stroke is a short curved polyline following the flow field,
-// sampling color at each step from the source image.
+function getEdgeMag(cx, cy) {
+    const ix = Math.min(Math.max(Math.round(cx/p5inst.width*iw),0),iw-1);
+    const iy = Math.min(Math.max(Math.round(cy/p5inst.height*ih),0),ih-1);
+    return sobelMag[iy*iw+ix] || 0;
+}
 
-function drawStroke(p) {
+// ─── Single stroke ────────────────────────────────────────────────────
+function drawStroke(p, layerScale) {
     if (!spawnCDF) return;
-
-    // Pick spawn point from edge-weighted CDF
     const pixIdx = sampleEdgePixel();
-    const ix = pixIdx % iw;
-    const iy = (pixIdx / iw) | 0;
-    let cx = (ix / iw) * p.width;
-    let cy = (iy / ih) * p.height;
+    const ix = pixIdx%iw, iy = (pixIdx/iw)|0;
+    let cx = (ix/iw)*p.width, cy = (iy/ih)*p.height;
 
-    // Initial direction: along edge contour + small noise perturbation
-    let angle = flowAngle(cx, cy) + (Math.random() - 0.5) * params.curvature * Math.PI;
-    const stepSize = 2.5;
-    const steps = Math.max(3, Math.round(params.strokeLength / stepSize));
+    const stepSize = (params.stepSize || 2.2) * layerScale;
+    const steps = Math.max(2, Math.round(params.strokeLength*layerScale / stepSize));
+    let angle = getFlowAngle(cx,cy) + (Math.random()-.5)*params.curvature*Math.PI;
 
+    // Pointillist: single dot
+    if (params.dotMode) {
+        const [r,g,b] = sampleColor(cx,cy);
+        p.noStroke(); p.fill(r,g,b,180);
+        const sz = params.strokeWidth * layerScale * (0.6+Math.random()*0.8);
+        p.ellipse(cx,cy,sz,sz);
+        return;
+    }
+
+    const baseW = params.strokeWidth * layerScale;
     p.noFill();
-    p.strokeWeight(params.strokeWidth * (0.5 + Math.random() * 0.8));
 
-    let px2 = cx, py2 = cy;
-    for (let i = 0; i < steps; i++) {
-        const [r, g, b] = sampleColor(cx, cy);
-        // Alpha fades in and out over stroke length for soft brushstroke feel
-        const t = i / steps;
-        const alpha = Math.sin(t * Math.PI) * 200 + 30;
-        p.stroke(r, g, b, alpha);
+    for (let i=0; i<steps; i++) {
+        const [r,g,b] = sampleColor(cx,cy);
+        const t = i/steps;
+        let alpha;
 
-        const nx = cx + Math.cos(angle) * stepSize;
-        const ny = cy + Math.sin(angle) * stepSize;
-        p.line(cx, cy, nx, ny);
+        if (params.waterMode) {
+            // Watercolor: very soft, overlapping washes
+            alpha = Math.sin(t*Math.PI)*90*params.alphaScale + Math.random()*20;
+            p.strokeWeight(baseW*(0.8+Math.random()*0.6));
+        } else if (params.inkMode) {
+            // Ink/pencil: dark strokes on light bg
+            const edgeMag = getEdgeMag(cx,cy);
+            alpha = (0.4+edgeMag*0.6) * 200 * Math.sin(t*Math.PI) * params.alphaScale;
+            p.strokeWeight(baseW*(0.5+edgeMag*0.8));
+            p.stroke(30,30,30,alpha);
+            const nx2 = cx+Math.cos(angle)*stepSize, ny2 = cy+Math.sin(angle)*stepSize;
+            p.line(cx,cy,nx2,ny2);
+            cx=nx2; cy=ny2;
+            const target = getFlowAngle(cx,cy);
+            let diff=target-angle; while(diff>Math.PI)diff-=2*Math.PI; while(diff<-Math.PI)diff+=2*Math.PI;
+            angle += diff*0.3+(Math.random()-.5)*params.curvature*0.4;
+            continue;
+        } else if (params.neonMode) {
+            // Neon: bright core + wide glow
+            alpha = Math.sin(t*Math.PI)*230*params.alphaScale;
+            // Draw glow pass
+            p.strokeWeight(baseW*4);
+            p.stroke(r,g,b,alpha*0.12);
+            const nx2=cx+Math.cos(angle)*stepSize, ny2=cy+Math.sin(angle)*stepSize;
+            p.line(cx,cy,nx2,ny2);
+            p.strokeWeight(baseW);
+            p.stroke(Math.min(r+80,255),Math.min(g+80,255),Math.min(b+80,255),alpha);
+            p.line(cx,cy,nx2,ny2);
+            cx=nx2; cy=ny2;
+            const target=getFlowAngle(cx,cy);
+            let diff=target-angle; while(diff>Math.PI)diff-=2*Math.PI; while(diff<-Math.PI)diff+=2*Math.PI;
+            angle+=diff*0.22+(Math.random()-.5)*params.curvature*0.4;
+            continue;
+        } else {
+            // Oil paint: rich opaque strokes
+            alpha = Math.sin(t*Math.PI)*220*params.alphaScale + 20;
+            p.strokeWeight(baseW*(0.7+Math.random()*0.5));
+        }
 
-        cx = nx; cy = ny;
-        // Gently steer angle toward local flow field
-        const targetAngle = flowAngle(cx, cy);
-        // Circular lerp
-        let diff = targetAngle - angle;
-        while (diff > Math.PI) diff -= 2*Math.PI;
-        while (diff < -Math.PI) diff += 2*Math.PI;
-        angle += diff * 0.25 + (Math.random() - 0.5) * params.curvature * 0.4;
+        p.stroke(r,g,b,alpha);
+        const nx2=cx+Math.cos(angle)*stepSize, ny2=cy+Math.sin(angle)*stepSize;
+        p.line(cx,cy,nx2,ny2);
+        cx=nx2; cy=ny2;
+        const target=getFlowAngle(cx,cy);
+        let diff=target-angle; while(diff>Math.PI)diff-=2*Math.PI; while(diff<-Math.PI)diff+=2*Math.PI;
+        angle+=diff*0.25+(Math.random()-.5)*params.curvature*0.4;
     }
 }
 
-// ─── p5 sketch ──────────────────────────────────────────────────────
+// ─── Render engine ────────────────────────────────────────────────────
+// Multi-layer: coarse pass (big strokes) → fine pass (small strokes) → detail
+const LAYER_SCALES = [2.5, 1.0, 0.5, 0.3];
 
+let renderQueue = []; // {layerIdx, count} tasks
+let renderTimer = null;
+
+function startRender() {
+    if (!sourceImg) return;
+    if (renderTimer) { clearInterval(renderTimer); renderTimer=null; }
+    rendering = true;
+    p5inst.randomSeed(params.seed);
+    p5inst.noiseSeed(params.seed);
+    rebuildCDF();
+    p5inst.background(params.bgLightness);
+
+    // Build render queue across layers
+    renderQueue = [];
+    const nLayers = Math.min(params.layers, LAYER_SCALES.length);
+    for (let l=0; l<nLayers; l++) {
+        // Each layer gets proportional stroke share; coarse layers fewer, fine layers more
+        const share = l===0 ? 0.25 : l===1 ? 0.45 : 0.2;
+        renderQueue.push({ layerIdx:l, count: Math.round(params.strokeDensity*share) });
+    }
+    totalStrokes = renderQueue.reduce((s,r)=>s+r.count, 0);
+    drawnStrokes = 0;
+
+    document.getElementById('progress-wrap').style.display = 'block';
+    setProgress(0, 'Rendering…');
+
+    const BATCH = 80;
+    renderTimer = setInterval(() => {
+        if (!renderQueue.length) {
+            clearInterval(renderTimer); renderTimer=null; rendering=false;
+            setProgress(100, 'Done');
+            setTimeout(()=>{ document.getElementById('progress-wrap').style.display='none'; }, 1200);
+            return;
+        }
+        const task = renderQueue[0];
+        const batch = Math.min(BATCH, task.count);
+        for (let i=0; i<batch; i++) drawStroke(p5inst, LAYER_SCALES[task.layerIdx]);
+        task.count -= batch; drawnStrokes += batch;
+        if (task.count <= 0) renderQueue.shift();
+        const pct = Math.round(drawnStrokes/totalStrokes*100);
+        setProgress(pct, `Layer ${renderQueue.length ? LAYER_SCALES.length - renderQueue.length + 1 : params.layers}/${params.layers} — ${pct}%`);
+    }, 16);
+}
+
+function setProgress(pct, label) {
+    document.getElementById('progress-fill').style.width = pct+'%';
+    document.getElementById('progress-label').textContent = label;
+}
+
+// ─── p5 sketch ───────────────────────────────────────────────────────
 const sketch = p => {
     p.setup = function() {
-        const canvas = p.createCanvas(1200, 1200);
-        canvas.parent('canvas-container');
+        const c = p.createCanvas(1200,1200);
+        c.parent('canvas-wrap');
         p.background(params.bgLightness);
         p.noLoop();
     };
-
-    p.draw = function() {
-        if (!drawing || !sourceImg) return;
-        // Draw a batch of strokes per frame for progressive rendering
-        const batch = Math.ceil(params.strokeDensity / 60);
-        for (let i = 0; i < batch; i++) drawStroke(p);
-    };
+    p.draw = function() {};
 };
-
 p5inst = new p5(sketch);
 
-// ─── System reset ────────────────────────────────────────────────────
-
-function resetAndRedraw() {
+// ─── Before/After toggle ──────────────────────────────────────────────
+function toggleBeforeAfter() {
     if (!sourceImg) return;
-    drawing = false;
-    p5inst.randomSeed(params.seed);
-    p5inst.noiseSeed(params.seed);
-    p5inst.background(params.bgLightness);
-    // Rebuild CDF if edge bias changed
-    buildSobel();
-    drawing = true;
-    p5inst.loop();
-    // Stop after strokeDensity strokes have been drawn (~1 second at 60fps)
-    const ms = Math.ceil(params.strokeDensity / (60 * Math.ceil(params.strokeDensity / 60))) * 1000 + 400;
-    setTimeout(() => { p5inst.noLoop(); drawing = false; }, ms + 600);
+    showingBefore = !showingBefore;
+    const overlay = document.getElementById('ba-overlay');
+    const btn = document.getElementById('btn-ba');
+    overlay.style.display = showingBefore ? 'block' : 'none';
+    btn.classList.toggle('active', showingBefore);
 }
 
-// ─── UI handlers ────────────────────────────────────────────────────
+// ─── Hi-res export ────────────────────────────────────────────────────
+function exportHiRes() {
+    if (!sourceImg) return;
+    setStatus('Rendering 2× export…');
+    // Render to an off-screen 2400×2400 p5 instance
+    const hiP = new p5(p => {
+        p.setup = function() {
+            const c = p.createCanvas(2400,2400);
+            c.parent(document.createElement('div'));
+            p.background(params.bgLightness);
+            p.randomSeed(params.seed); p.noiseSeed(params.seed);
+            const nLayers = Math.min(params.layers, LAYER_SCALES.length);
+            const total = params.strokeDensity * 2;
+            let done = 0;
+            // Inline render (synchronous) for export — fine since it's off-screen
+            const renderLayer = (li) => {
+                const share = li===0?0.25:li===1?0.45:0.2;
+                const count = Math.round(total*share);
+                for (let i=0; i<count; i++) drawStroke(p, LAYER_SCALES[li]*2);
+                done += count;
+            };
+            for (let l=0; l<nLayers; l++) renderLayer(l);
+            p.saveCanvas('art-2x-'+params.seed, 'png');
+            setStatus('2× export saved');
+            p.remove();
+        };
+        p.draw = function() { p.noLoop(); };
+    });
+}
 
+// ─── Style presets ────────────────────────────────────────────────────
+function setPreset(name) {
+    currentPreset = name;
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.toggle('active', b.dataset.preset===name));
+    const p = PRESETS[name];
+    Object.assign(params, p);
+    // Sync sliders
+    ['strokeDensity','strokeLength','edgeBias','curvature','strokeWidth','brightnessBoost','bgLightness','layers'].forEach(k => {
+        const el = document.getElementById(k); if(el) el.value = params[k];
+        const v = document.getElementById('v-'+k);
+        if(v) v.textContent = typeof params[k]==='number'&&!Number.isInteger(params[k]) ? params[k].toFixed(2) : params[k];
+    });
+    if (sourceImg) startRender();
+}
+
+// ─── UI handlers ──────────────────────────────────────────────────────
 function updateParam(name, value) {
     params[name] = value;
-    const disp = document.getElementById(name + '-value');
-    if (disp) disp.textContent = typeof value === 'number' && !Number.isInteger(value) ? value.toFixed(2) : value;
+    const v = document.getElementById('v-'+name);
+    if (v) v.textContent = typeof value==='number'&&!Number.isInteger(value) ? value.toFixed(2) : value;
 }
 
 function updateSeedDisplay() { document.getElementById('seed-input').value = params.seed; }
-function updateSeed() { const v = parseInt(document.getElementById('seed-input').value); if (v > 0) { params.seed = v; resetAndRedraw(); } else updateSeedDisplay(); }
-function previousSeed() { params.seed = Math.max(1, params.seed - 1); updateSeedDisplay(); resetAndRedraw(); }
-function nextSeed()     { params.seed += 1; updateSeedDisplay(); resetAndRedraw(); }
-function randomSeedAndUpdate() { params.seed = Math.floor(Math.random() * 99999) + 1; updateSeedDisplay(); resetAndRedraw(); }
+function updateSeed() { const v=+document.getElementById('seed-input').value; if(v>0){params.seed=v;} else updateSeedDisplay(); }
+function previousSeed() { params.seed=Math.max(1,params.seed-1); updateSeedDisplay(); }
+function nextSeed()     { params.seed+=1; updateSeedDisplay(); }
+function randomSeedAndUpdate() { params.seed=Math.floor(Math.random()*99999)+1; updateSeedDisplay(); }
 
 function resetParameters() {
-    params = { ...defaultParams };
-    ['strokeDensity','strokeLength','edgeBias','curvature','strokeWidth','brightnessBoost','bgLightness'].forEach(k => {
-        const el = document.getElementById(k); if (el) el.value = params[k];
-        const d = document.getElementById(k+'-value'); if (d) d.textContent = params[k];
-    });
-    updateSeedDisplay();
-    resetAndRedraw();
+    setPreset(currentPreset);
 }
 
-function downloadCanvas() { if (p5inst) p5inst.saveCanvas('art-' + params.seed, 'png'); }
+function downloadCanvas() {
+    if (p5inst) p5inst.saveCanvas('art-'+params.seed, 'png');
+}
 
-// ─── Auto-load from voice agent (sessionStorage or ?img= param) ─────
-
+// ─── Auto-load from voice agent ───────────────────────────────────────
 function _tryAutoLoad() {
     let dataURL = sessionStorage.getItem('artImg');
-    let label = 'voice agent image';
+    let label = 'voice image';
     if (dataURL) {
         sessionStorage.removeItem('artImg');
     } else {
@@ -428,15 +638,17 @@ function _tryAutoLoad() {
     }
     setStatus('Loading from voice agent…');
     p5inst.loadImage(dataURL, img => {
-        sourceImg = img;
-        iw = img.width; ih = img.height;
+        sourceImg=img; iw=img.width; ih=img.height;
         document.getElementById('thumb').src = dataURL;
-        document.getElementById('thumb-container').style.display = 'block';
-        buildSobel();
-        resetAndRedraw();
+        document.getElementById('ba-img').src = dataURL;
+        document.getElementById('thumb-wrap').style.display='block';
+        buildSobel(); extractPalette();
         setStatus(`${iw}×${ih} — ${label}`);
-        document.getElementById('loading-panel').style.display = 'none';
-        document.getElementById('btn-save').disabled = false;
+        document.getElementById('loading-panel').style.display='none';
+        document.getElementById('btn-ba').disabled=false;
+        document.getElementById('btn-hires').disabled=false;
+        document.getElementById('btn-save').disabled=false;
+        startRender();
     }, () => setStatus('Auto-load failed — drop image manually'));
 }
 
