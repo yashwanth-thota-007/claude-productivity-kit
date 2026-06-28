@@ -1559,7 +1559,8 @@ class VoiceApp(rumps.App):
 
         img_prefix = self._clipboard_image_for_voice()
         if self._agent_mode:
-            prompt = f"{_AGENT_SYSTEM_PROMPT}{text}"
+            # Include any attached screenshot so agent can see it
+            prompt = f"{_AGENT_SYSTEM_PROMPT}{img_prefix}{text}"
         else:
             prompt = f"{img_prefix}{text}"
 
@@ -1581,7 +1582,8 @@ class VoiceApp(rumps.App):
         if self._agent_mode:
             session_name = self._agent_session_name(text)
             self._ensure_agentfs_session(session_name)
-            cmd = [self._agentfs_bin(), "run", "--session", session_name] + claude_cmd
+            # --allow / gives agent full write access; COW layer keeps real files safe
+            cmd = [self._agentfs_bin(), "run", "--session", session_name, "--allow", "/"] + claude_cmd
         else:
             cmd = claude_cmd
             session_name = None
