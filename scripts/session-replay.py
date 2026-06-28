@@ -52,6 +52,84 @@ Bullet list of open items, TODOs, or natural next actions. If nothing is pending
 Be factual and terse. No fluff. Use backticks for file paths, function names, commands."""
 
 
+DISCERNMENT_LOG = Path.home() / ".claude" / "discernment-log.jsonl"
+
+
+def parse_entries(transcript_path: str) -> list:
+    """Return all parsed JSONL entries from the transcript file."""
+    if not transcript_path or not Path(transcript_path).exists():
+        return []
+    entries = []
+    for line in Path(transcript_path).read_text().strip().splitlines():
+        try:
+            entries.append(json.loads(line))
+        except Exception:
+            continue
+    return entries
+
+
+def compute_metrics(entries: list, session_id: str) -> str:
+    """Compute session metrics from transcript entries and discernment log."""
+    # Duration
+    timestamps = [e["timestamp"] for e in entries if "timestamp" in e]
+    if len(timestamps) >= 2:
+        delta_sec = timestamps[-1] - timestamps[0]
+        duration = f"{int(delta_sec // 60)} min"
+    else:
+        duration = "unknown"
+
+    # Message counts
+    user_count = sum(1 for e in entries if e.get("type") == "user")
+    asst_count = sum(1 for e in entries if e.get("type") == "assistant")
+
+    # Tool calls
+    tool_counts: dict = {}
+    for e in entries:
+        if e.get("type") != "assistant":
+            continue
+        for block in e.get("message", {}).get("content", []):
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                name = block.get("name", "unknown")
+                tool_counts[name] = tool_counts.get(name, 0) + 1
+    total_tools = sum(tool_counts.values())
+    top3 = sorted(tool_counts.items(), key=lambda x: -x[1])[:3]
+    top3_str = ", ".join(f"{n}x{c}" for n, c in top3) if top3 else "none"
+
+    # Tokens from last assistant entry's usage block
+    input_tokens = output_tokens = "unknown"
+    for e in reversed(entries):
+        if e.get("type") == "assistant":
+            usage = e.get("message", {}).get("usage", {})
+            if usage:
+                input_tokens = usage.get("input_tokens", "unknown")
+                output_tokens = usage.get("output_tokens", "unknown")
+            break
+
+    # Discernment average for this session
+    disc_avg = "n/a"
+    if DISCERNMENT_LOG.exists():
+        scores = []
+        for line in DISCERNMENT_LOG.read_text().strip().splitlines():
+            try:
+                rec = json.loads(line)
+                if rec.get("session_id") == session_id:
+                    scores.append(float(rec["composite"]))
+            except Exception:
+                continue
+        if scores:
+            disc_avg = f"{sum(scores) / len(scores):.1f}/10"
+
+    return (
+        "## Metrics\n"
+        f"- Duration: {duration} (first → last message timestamp delta)\n"
+        f"- Messages: {user_count} user, {asst_count} assistant\n"
+        f"- Tool calls: {total_tools} total (top 3 tools: {top3_str})\n"
+        f"- Input tokens: {input_tokens} (from last assistant usage block)\n"
+        f"- Output tokens: {output_tokens} (from last assistant usage block)\n"
+        f"- Discernment avg: {disc_avg} (from discernment-log.jsonl)\n"
+    )
+
+
 def find_transcript(session_id: str) -> str:
     """Find the transcript file for this session across all project dirs."""
     for project_dir in TRANSCRIPTS_DIR.iterdir():
@@ -161,6 +239,7 @@ def main():
 
     contract   = load_contract(session_id)
     transcript_path = find_transcript(session_id)
+    entries    = parse_entries(transcript_path)
     transcript = extract_transcript_text(transcript_path, MAX_TRANSCRIPT_CHARS)
 
     if not transcript:
@@ -183,7 +262,8 @@ def main():
     except Exception:
         pass
 
-    doc = f"# {title}\n\n**Session:** `{session_id[:8]}`  \n**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n{summary}\n"
+    metrics = compute_metrics(entries, session_id)
+    doc = f"# {title}\n\n**Session:** `{session_id[:8]}`  \n**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n{summary}\n\n{metrics}"
     fname.write_text(doc)
 
     # Index into personal sessions.db + inject Obsidian wikilinks

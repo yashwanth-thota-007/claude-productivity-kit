@@ -117,6 +117,46 @@ def drift_score(prompt_lower: str, keywords: list) -> float:
     return absent / len(keywords)
 
 
+def _temporal_context() -> str:
+    """Return a short note about the current time that may inform response style."""
+    from datetime import datetime
+    now = datetime.now()
+    hour = now.hour
+    weekday = now.weekday()  # 0=Mon … 6=Sun
+    parts = []
+    if hour < 6:
+        parts.append("⚠️  Working very late (after midnight) — keep responses concise, prioritise clarity over completeness.")
+    elif hour >= 22:
+        parts.append("🌙  Late-night session — be especially clear and decisive; fatigue affects judgement.")
+    elif hour < 9:
+        parts.append("🌅  Early morning — user may be in rapid-fire mode before standup; prefer crisp answers.")
+    if weekday >= 5:
+        parts.append("📅  Weekend session — likely personal/exploration work, not production.")
+    return "\n".join(parts)
+
+
+def _focus_lock_context() -> str:
+    """Inject active focus lock constraint if one is set."""
+    lock_path = Path.home() / ".claude" / "focus-lock.json"
+    if not lock_path.exists():
+        return ""
+    try:
+        lock = json.loads(lock_path.read_text())
+        if not lock.get("active"):
+            return ""
+        goal = lock.get("goal", "")
+        blocked = lock.get("blocked_topics", [])
+        if not goal:
+            return ""
+        lines = [f"[FOCUS LOCK] Goal: {goal}"]
+        if blocked:
+            lines.append(f"Blocked topics: {', '.join(blocked)}")
+        lines.append("Stay on goal. Flag any off-topic requests before addressing them.")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def format_contract_context(c: dict) -> str:
     effort_map = {
         "quick": "Be efficient — avoid over-engineering, skip elaborate preamble.",
@@ -130,6 +170,12 @@ def format_contract_context(c: dict) -> str:
     parts.append(f"Performance  : {c.get('performance', 'unspecified')}")
     if effort_note:
         parts.append(f"Effort level : {c.get('effort')} — {effort_note}")
+    temporal = _temporal_context()
+    if temporal:
+        parts.append(temporal)
+    focus = _focus_lock_context()
+    if focus:
+        parts.append(focus)
     parts.append("Stay aligned to these goals. If your response drifts from them, self-correct.")
     return "\n".join(parts)
 
