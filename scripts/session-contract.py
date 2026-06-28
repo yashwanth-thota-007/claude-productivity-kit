@@ -161,6 +161,22 @@ def get_mental_model_context(prompt: str, cwd: str) -> str:
     return ""
 
 
+def get_knowledge_context(prompt: str) -> str:
+    try:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from knowledge import query
+        results = query(prompt, top_n=4)
+        if not results:
+            return ""
+        lines = ["## Relevant Knowledge"]
+        for r in results:
+            src = f" ({r['source']})" if r.get("source") else ""
+            lines.append(f"- {r['fact']}{src}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -206,8 +222,11 @@ def main():
         context = format_contract_context(contract)
         cwd = hook_input.get("cwd", str(Path.home()))
         mm = get_mental_model_context(prompt, cwd)
+        kb = get_knowledge_context(prompt)
         if mm:
             context = f"{context}\n\n{mm}"
+        if kb:
+            context = f"{context}\n\n{kb}"
         print(json.dumps({"additionalSystemPrompt": context}))
         return
 
@@ -222,6 +241,7 @@ def main():
 
     cwd = hook_input.get("cwd", str(Path.home()))
     mm = get_mental_model_context(prompt, cwd)
+    kb = get_knowledge_context(prompt)
 
     if is_new_task and drift >= 0.85 and len(keywords) >= 3:
         warning = format_drift_warning(existing)
@@ -232,6 +252,8 @@ def main():
 
     if mm:
         full = f"{full}\n\n{mm}"
+    if kb:
+        full = f"{full}\n\n{kb}"
     print(json.dumps({"additionalSystemPrompt": full}))
 
 

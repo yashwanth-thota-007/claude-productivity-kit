@@ -16,7 +16,8 @@ import math
 import sqlite3
 from pathlib import Path
 
-PERSONAL_DB = Path.home() / ".claude" / "sessions.db"
+PERSONAL_DB  = Path.home() / ".claude" / "sessions.db"
+KNOWLEDGE_DB = Path.home() / ".claude" / "knowledge.db"
 
 
 def _connect(path: str) -> sqlite3.Connection:
@@ -74,6 +75,36 @@ def _init_project(conn: sqlite3.Connection):
         );
     """)
     conn.commit()
+
+
+def _init_knowledge(conn: sqlite3.Connection):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS knowledge (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url  TEXT,
+            source_type TEXT NOT NULL DEFAULT 'web',
+            fact        TEXT NOT NULL,
+            embedding   TEXT,
+            session_id  TEXT,
+            added_at    TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+            source_url,
+            source_type,
+            fact,
+            content='',
+            contentless_delete=1
+        );
+    """)
+    conn.commit()
+
+
+def knowledge_db() -> sqlite3.Connection:
+    KNOWLEDGE_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = _connect(str(KNOWLEDGE_DB))
+    _init_knowledge(conn)
+    return conn
 
 
 def personal_db() -> sqlite3.Connection:
