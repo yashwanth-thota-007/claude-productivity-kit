@@ -223,6 +223,52 @@ def get_knowledge_context(prompt: str) -> str:
         return ""
 
 
+def get_session_memory_context(prompt: str) -> str:
+    """Surface top relevant past session replays as context.
+    Uses local vector search — no API call."""
+    try:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+        from embed import embed
+        from db import cosine_distance
+        import re
+
+        replays_dir = Path.home() / ".claude" / "session-replays"
+        if not replays_dir.exists():
+            return ""
+
+        query_vec = embed(prompt[:500])
+        scored = []
+        for f in replays_dir.glob("*.md"):
+            try:
+                text = f.read_text()
+                # Embed title + goal section only (cheap and representative)
+                title_match = re.match(r"^#\s+(.+)$", text, re.MULTILINE)
+                goal_match = re.search(r"## Goal\n(.+?)(?:\n\n|\n##)", text, re.DOTALL)
+                snippet = ""
+                if title_match:
+                    snippet += title_match.group(1).strip() + ". "
+                if goal_match:
+                    snippet += goal_match.group(1).strip()
+                if not snippet:
+                    continue
+                doc_vec = embed(snippet[:400])
+                dist = cosine_distance(query_vec, __import__("json").dumps(doc_vec))
+                if dist < 0.35:
+                    scored.append((dist, f.stem[:16], snippet[:100]))
+            except Exception:
+                continue
+
+        scored.sort(key=lambda x: x[0])
+        if not scored:
+            return ""
+        lines = ["## Related Past Sessions"]
+        for _, date, snippet in scored[:3]:
+            lines.append(f"- [{date}] {snippet}")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def main():
     try:
         hook_input = json.load(sys.stdin)
@@ -269,10 +315,13 @@ def main():
         cwd = hook_input.get("cwd", str(Path.home()))
         mm = get_mental_model_context(prompt, cwd)
         kb = get_knowledge_context(prompt)
+        sm = get_session_memory_context(prompt)
         if mm:
             context = f"{context}\n\n{mm}"
         if kb:
             context = f"{context}\n\n{kb}"
+        if sm:
+            context = f"{context}\n\n{sm}"
         print(json.dumps({"additionalSystemPrompt": context}))
         return
 
@@ -288,6 +337,8 @@ def main():
     cwd = hook_input.get("cwd", str(Path.home()))
     mm = get_mental_model_context(prompt, cwd)
     kb = get_knowledge_context(prompt)
+    # Only inject session memory on first new-task request to keep prompt lean
+    sm = get_session_memory_context(prompt) if is_new_task else ""
 
     if is_new_task and drift >= 0.85 and len(keywords) >= 3:
         warning = format_drift_warning(existing)
@@ -300,6 +351,8 @@ def main():
         full = f"{full}\n\n{mm}"
     if kb:
         full = f"{full}\n\n{kb}"
+    if sm:
+        full = f"{full}\n\n{sm}"
     print(json.dumps({"additionalSystemPrompt": full}))
 
 
