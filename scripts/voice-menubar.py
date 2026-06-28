@@ -1507,6 +1507,52 @@ class VoiceApp(rumps.App):
             return f"@{out} "
         return ""
 
+    def _agent_session_name(self, goal: str) -> str:
+        """Stable slug for the AgentFS session — reused across turns for the same goal."""
+        import re
+        slug = re.sub(r"[^a-z0-9]+", "-", goal.lower().strip())[:40].strip("-")
+        return f"voice-{slug}" if slug else "voice-agent"
+
+    def _agentfs_bin(self) -> str:
+        import os
+        for candidate in [
+            os.path.expanduser("~/.cargo/bin/agentfs"),
+            "/usr/local/bin/agentfs",
+            "/opt/homebrew/bin/agentfs",
+        ]:
+            if os.path.exists(candidate):
+                return candidate
+        return "agentfs"
+
+    def _ensure_agentfs_session(self, session_name: str):
+        """Create the AgentFS session DB if it doesn't exist yet."""
+        import os
+        db = Path.home() / ".agentfs" / f"{session_name}.db"
+        if not db.exists():
+            subprocess.run(
+                [self._agentfs_bin(), "init", session_name, "--base", str(Path.home())],
+                capture_output=True, cwd=str(Path.home()),
+            )
+
+    def _agentfs_diff(self, session_name: str) -> str:
+        """Return a short summary of what the agent changed."""
+        try:
+            result = subprocess.run(
+                [self._agentfs_bin(), "diff", session_name],
+                capture_output=True, text=True, timeout=10, cwd=str(Path.home()),
+            )
+            diff = result.stdout.strip()
+            if not diff or "No changes" in diff:
+                return ""
+            # Trim to first 800 chars so overlay stays readable
+            lines = diff.splitlines()
+            summary = "\n".join(lines[:30])
+            if len(lines) > 30:
+                summary += f"\n… ({len(lines) - 30} more lines)"
+            return f"\n\n---\n**Agent changed:**\n```\n{summary}\n```"
+        except Exception:
+            return ""
+
     def _send_to_claude(self, text: str):
         """Stream claude response, pushing text chunks to overlay as they arrive."""
         self.status_item.title = "Status: Asking Claude..."
@@ -1517,25 +1563,34 @@ class VoiceApp(rumps.App):
         else:
             prompt = f"{img_prefix}{text}"
 
-        cmd = [
+        claude_cmd = [
             "/opt/homebrew/bin/claude", "--print",
             "--output-format", "stream-json", "--verbose",
             "--dangerously-skip-permissions",
         ]
         model = _claude_model()
         if model:
-            cmd += ["--model", model]
+            claude_cmd += ["--model", model]
         if VOICE_SESSION_FILE.exists():
             sid = VOICE_SESSION_FILE.read_text().strip()
             if sid:
-                cmd += ["--resume", sid]
-        cmd.append(prompt)
+                claude_cmd += ["--resume", sid]
+        claude_cmd.append(prompt)
+
+        # Wrap in AgentFS COW sandbox when agent mode is active
+        if self._agent_mode:
+            session_name = self._agent_session_name(text)
+            self._ensure_agentfs_session(session_name)
+            cmd = [self._agentfs_bin(), "run", "--session", session_name] + claude_cmd
+        else:
+            cmd = claude_cmd
+            session_name = None
 
         accumulated = ""
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                env=_build_claude_env(),
+                env=_build_claude_env(), cwd=str(Path.home()),
             )
             for raw in proc.stdout:
                 raw = raw.strip()
@@ -1562,6 +1617,12 @@ class VoiceApp(rumps.App):
             proc.wait(timeout=5)
         except Exception as e:
             self._overlay.stream_chunk(f"Error: {e}")
+
+        # Show AgentFS diff in overlay after agent run
+        if self._agent_mode and session_name:
+            diff_summary = self._agentfs_diff(session_name)
+            if diff_summary:
+                self._overlay.stream_chunk(accumulated + diff_summary)
 
         play_sound(SOUND_STOP)
         self._reset_idle("Ready")
