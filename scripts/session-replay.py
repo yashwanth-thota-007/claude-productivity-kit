@@ -70,13 +70,30 @@ def parse_entries(transcript_path: str) -> list:
 
 def compute_metrics(entries: list, session_id: str) -> str:
     """Compute session metrics from transcript entries and discernment log."""
-    # Duration
-    timestamps = [e["timestamp"] for e in entries if "timestamp" in e]
-    if len(timestamps) >= 2:
-        delta_sec = timestamps[-1] - timestamps[0]
-        duration = f"{int(delta_sec // 60)} min"
-    else:
-        duration = "unknown"
+    # Duration — timestamps may be ISO strings or unix floats
+    duration = "unknown"
+    raw_ts = [e["timestamp"] for e in entries if "timestamp" in e]
+    if len(raw_ts) >= 2:
+        try:
+            from datetime import datetime as _dt
+            def _to_float(ts):
+                if isinstance(ts, (int, float)):
+                    return float(ts)
+                # ISO-8601 e.g. "2026-06-29T00:03:12.123Z"
+                ts = ts.rstrip("Z").replace("T", " ")
+                for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        return _dt.strptime(ts, fmt).timestamp()
+                    except ValueError:
+                        continue
+                return None
+            t0 = _to_float(raw_ts[0])
+            t1 = _to_float(raw_ts[-1])
+            if t0 is not None and t1 is not None:
+                delta_sec = t1 - t0
+                duration = f"{int(delta_sec // 60)} min"
+        except Exception:
+            pass
 
     # Message counts
     user_count = sum(1 for e in entries if e.get("type") == "user")
