@@ -237,9 +237,10 @@ def speak(text: str, voice: str = DEFAULT_TTS_VOICE):
     if len(clean) > TTS_MAX_CHARS:
         clean = clean[:TTS_MAX_CHARS].rsplit(" ", 1)[0] + "… see overlay for full response."
     if clean:
+        # -r 175 is slightly slower than the default 200 — noticeably more natural
         threading.Thread(
             target=subprocess.run,
-            args=(["say", "-v", voice, clean],),
+            args=(["say", "-v", voice, "-r", "175", clean],),
             kwargs={"capture_output": True},
             daemon=True,
         ).start()
@@ -822,19 +823,36 @@ class VoiceOverlay:
 
         cv = win.contentView()
 
-        # Close button
-        close_btn = NSButton.alloc().initWithFrame_(
-            NSMakeRect(self.W - 28, self.H - self.BTN_H - 4, 24, self.BTN_H)
-        )
-        close_btn.setTitle_("✕")
-        close_btn.setBezelStyle_(0)
-        close_btn.setBordered_(False)
-        close_btn.setFont_(NSFont.systemFontOfSize_(12.0))
-        cv.addSubview_(close_btn)
+        # Title bar at the bottom of the content view — stays visible when minimized
+        # (window shrinks from top, bottom stays fixed in screen coords)
+        bar_y = 0
+        bar_h = self.BTN_H + 8
 
-        # Minimize button
+        # Mini-bar background — dark strip
+        from AppKit import NSView
+        bar_bg = NSView.alloc().initWithFrame_(NSMakeRect(0, bar_y, self.W, bar_h))
+        bar_bg.setWantsLayer_(True)
+        bar_bg.layer().setBackgroundColor_(
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08, 0.08, 0.10, 1.0).CGColor()
+        )
+        cv.addSubview_(bar_bg)
+
+        # Title label
+        title_lbl = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(8, bar_y + 4, self.W - 70, self.BTN_H)
+        )
+        title_lbl.setStringValue_("🎙 Claude")
+        title_lbl.setBezeled_(False)
+        title_lbl.setDrawsBackground_(False)
+        title_lbl.setEditable_(False)
+        title_lbl.setSelectable_(False)
+        title_lbl.setFont_(NSFont.systemFontOfSize_(11.0))
+        title_lbl.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.6, 0.65, 1.0))
+        cv.addSubview_(title_lbl)
+
+        # Minimize/restore button
         mini_btn = NSButton.alloc().initWithFrame_(
-            NSMakeRect(self.W - 54, self.H - self.BTN_H - 4, 24, self.BTN_H)
+            NSMakeRect(self.W - 54, bar_y + 4, 24, self.BTN_H)
         )
         mini_btn.setTitle_("–")
         mini_btn.setBezelStyle_(0)
@@ -842,8 +860,18 @@ class VoiceOverlay:
         mini_btn.setFont_(NSFont.systemFontOfSize_(14.0))
         cv.addSubview_(mini_btn)
 
-        # WKWebView fills area below buttons
-        wv_rect = NSMakeRect(0, 0, self.W, self.H - self.BTN_H - 8)
+        # Close button
+        close_btn = NSButton.alloc().initWithFrame_(
+            NSMakeRect(self.W - 28, bar_y + 4, 24, self.BTN_H)
+        )
+        close_btn.setTitle_("✕")
+        close_btn.setBezelStyle_(0)
+        close_btn.setBordered_(False)
+        close_btn.setFont_(NSFont.systemFontOfSize_(12.0))
+        cv.addSubview_(close_btn)
+
+        # WKWebView fills area above the title bar
+        wv_rect = NSMakeRect(0, bar_h, self.W, self.H - bar_h)
         cfg = WKWebViewConfiguration.alloc().init()
         # Register JS message handler for Allow/Deny button clicks
         self._msg_handler = _PermissionMessageHandler.alloc().init()
@@ -957,8 +985,9 @@ class VoiceOverlay:
             from AppKit import NSScreen
             frame = NSScreen.mainScreen().frame()
             x, y  = self._compute_origin(frame)
+            # Keep the bottom bar at the same screen position — shrink height only
             self._window.setFrame_display_(
-                NSMakeRect(x, y + self.H - self.MINI_H, self.W, self.MINI_H), True
+                NSMakeRect(x, y, self.W, self.MINI_H), True
             )
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
@@ -2233,7 +2262,9 @@ location.href='file://{art_html}';
                         self._session_end_mtime = mtime
                         signal = json.loads(session_end_signal.read_text())
                         content = signal.get("content", "")
-                        if content and signal.get("type") == "session_end":
+                        voice_sid = VOICE_SESSION_FILE.read_text().strip() if VOICE_SESSION_FILE.exists() else ""
+                        is_voice = voice_sid and signal.get("session_id") == voice_sid
+                        if content and signal.get("type") == "session_end" and not is_voice:
                             play_sound(SOUND_STOP)
                             self._overlay.show(f"**Session complete**\n\n{content}")
             except Exception:
