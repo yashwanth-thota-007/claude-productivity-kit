@@ -108,6 +108,16 @@ DEFAULT_TTS          = False
 DEFAULT_TTS_VOICE    = "Samantha"
 
 TTS_MAX_CHARS = 400   # truncate spoken text beyond this
+TTS_VOICES    = [
+    "Samantha",             # en_US — clear, natural default
+    "Daniel",               # en_GB — British male
+    "Karen",                # en_AU — Australian female
+    "Flo (English (US))",   # en_US — warm female
+    "Reed (English (US))",  # en_US — male
+    "Eddy (English (US))",  # en_US — casual male
+    "Sandy (English (US))", # en_US — friendly female
+    "Shelley (English (US))", # en_US — expressive female
+]
 
 SILENCE_OPTIONS          = [0.5, 1.0, 1.5, 2.0, 3.0]
 OVERLAY_POSITIONS        = ["top-right", "top-left", "bottom-right", "bottom-left"]
@@ -1189,6 +1199,17 @@ class VoiceApp(rumps.App):
         self._tts_item.state = self._cfg["tts"]
         settings_menu.add(self._tts_item)
 
+        # TTS voice picker
+        tts_voice_sub = rumps.MenuItem("  TTS voice")
+        self._tts_voice_items = {}
+        for v in TTS_VOICES:
+            item = rumps.MenuItem(f"  {v}", callback=self._set_tts_voice)
+            item._tts_voice_val = v
+            item.state = (v == self._cfg["tts_voice"])
+            tts_voice_sub.add(item)
+            self._tts_voice_items[v] = item
+        settings_menu.add(tts_voice_sub)
+
         # Focus guard status + reset in Pomodoro menu
         self._focus_status_item = rumps.MenuItem("🧠 Focus: 0 sessions")
         self._focus_reset_item  = rumps.MenuItem("  Reset focus guard", callback=self._reset_focus_guard)
@@ -1394,6 +1415,16 @@ class VoiceApp(rumps.App):
         if enabled:
             speak("Voice reply enabled.", voice=self._cfg["tts_voice"])
         threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
+
+    def _set_tts_voice(self, sender):
+        voice = sender._tts_voice_val
+        self._cfg["tts_voice"] = voice
+        save_settings(self._cfg)
+        for v, item in self._tts_voice_items.items():
+            item.state = (v == voice)
+        self.status_item.title = f"Status: TTS voice → {voice}"
+        speak(f"Hi, I'm {voice.split('(')[0].strip()}. I'll be your voice.", voice=voice)
+        threading.Timer(3.0, lambda: self._reset_idle("Ready")).start()
 
     def _start_recording(self):
         # Pause wake listener so its AVAudioEngine tap doesn't conflict
