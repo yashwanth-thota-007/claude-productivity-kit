@@ -1865,7 +1865,7 @@ location.href='file://{art_html}';
         accumulated = ""
         try:
             proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 env=_build_claude_env(), cwd=str(Path.home()),
             )
             for raw in proc.stdout:
@@ -1883,13 +1883,71 @@ location.href='file://{art_html}';
                             accumulated = block["text"]
                             self._overlay.stream_chunk(accumulated)
                 elif t == "result":
-                    sid = obj.get("session_id", "")
-                    if sid:
-                        VOICE_SESSION_FILE.write_text(sid)
-                        self._refresh_voice_session_item()
-                    if not accumulated:
-                        accumulated = obj.get("result", "No response.")
-                        self._overlay.stream_chunk(accumulated)
+                    is_error = obj.get("is_error", False)
+                    errors   = obj.get("errors", [])
+                    sid      = obj.get("session_id", "")
+
+                    if is_error and errors:
+                        # Session expired/not found — clear stale ID and retry once
+                        stale_msg = errors[0]
+                        if "No conversation found" in stale_msg and VOICE_SESSION_FILE.exists():
+                            VOICE_SESSION_FILE.unlink()
+                            self._refresh_voice_session_item()
+                            # Retry without --resume
+                            retry_cmd = [c for c in cmd if not (c == "--resume" or (
+                                i > 0 and cmd[i-1] == "--resume"
+                            )) for i, c in enumerate(cmd)
+                            ]
+                            # Rebuild cleanly: drop --resume <sid> pair
+                            clean_cmd = []
+                            skip_next = False
+                            for token in cmd:
+                                if skip_next:
+                                    skip_next = False
+                                    continue
+                                if token == "--resume":
+                                    skip_next = True
+                                    continue
+                                clean_cmd.append(token)
+                            proc2 = subprocess.Popen(
+                                clean_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, env=_build_claude_env(), cwd=str(Path.home()),
+                            )
+                            for raw2 in proc2.stdout:
+                                raw2 = raw2.strip()
+                                if not raw2:
+                                    continue
+                                try:
+                                    obj2 = json.loads(raw2)
+                                except json.JSONDecodeError:
+                                    continue
+                                t2 = obj2.get("type")
+                                if t2 == "assistant":
+                                    for block in obj2.get("message", {}).get("content", []):
+                                        if block.get("type") == "text":
+                                            accumulated = block["text"]
+                                            self._overlay.stream_chunk(accumulated)
+                                elif t2 == "result":
+                                    new_sid = obj2.get("session_id", "")
+                                    if new_sid:
+                                        VOICE_SESSION_FILE.write_text(new_sid)
+                                        self._refresh_voice_session_item()
+                                    if not accumulated:
+                                        accumulated = obj2.get("result", "")
+                                        if accumulated:
+                                            self._overlay.stream_chunk(accumulated)
+                            proc2.wait(timeout=5)
+                        else:
+                            accumulated = stale_msg
+                            self._overlay.stream_chunk(f"⚠️ {stale_msg}")
+                    else:
+                        if sid:
+                            VOICE_SESSION_FILE.write_text(sid)
+                            self._refresh_voice_session_item()
+                        if not accumulated:
+                            accumulated = obj.get("result", "")
+                            if accumulated:
+                                self._overlay.stream_chunk(accumulated)
             proc.wait(timeout=5)
         except Exception as e:
             self._overlay.stream_chunk(f"Error: {e}")
