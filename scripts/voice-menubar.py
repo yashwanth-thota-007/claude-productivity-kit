@@ -486,9 +486,53 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     font-size: 13px;
     color: #e8e8e8;
-    padding: 8px 10px 16px;
-    overflow-x: hidden;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
+/* ── Tab bar ── */
+.tab-bar {
+    display: flex;
+    background: #1a1a1d;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+}
+.tab-btn {
+    flex: 1;
+    padding: 7px 0;
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 12px;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.15s;
+}
+.tab-btn.active {
+    color: #e8e8e8;
+    border-bottom: 2px solid #5bb3f5;
+}
+.tab-btn .badge {
+    display: inline-block;
+    background: #c87e00;
+    color: #fff;
+    font-size: 10px;
+    font-weight: bold;
+    border-radius: 8px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+/* ── Tab panes ── */
+.tab-pane {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px 10px 16px;
+}
+.tab-pane.active { display: block; }
 .bubble { margin-bottom: 10px; display: flex; flex-direction: column; }
 .bubble.user  { align-items: flex-end; }
 .bubble.assistant, .bubble.status { align-items: flex-start; }
@@ -623,30 +667,62 @@ _OVERLAY_HTML_SHELL = """<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
 <style>{css}</style>
-</head><body id="body"></body></html>"""
+</head><body>
+<div class="tab-bar">
+  <button class="tab-btn active" id="btn-chat"   onclick="switchTab('chat')">💬 Chat</button>
+  <button class="tab-btn"        id="btn-alerts" onclick="switchTab('alerts')">🔔 Alerts</button>
+</div>
+<div class="tab-pane active" id="tab-chat"></div>
+<div class="tab-pane"        id="tab-alerts"></div>
+<script>
+function switchTab(name) {{
+  document.querySelectorAll('.tab-btn').forEach(function(b){{b.classList.remove('active');}});
+  document.querySelectorAll('.tab-pane').forEach(function(p){{p.classList.remove('active');}});
+  document.getElementById('btn-' + name).classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'alerts') {{
+    var b = document.querySelector('#btn-alerts .badge');
+    if (b) b.remove();
+  }}
+}}
+function badgeAlerts() {{
+  var btn = document.getElementById('btn-alerts');
+  if (btn.classList.contains('active')) return;
+  if (!btn.querySelector('.badge')) {{
+    var b = document.createElement('span');
+    b.className = 'badge';
+    b.textContent = '!';
+    btn.appendChild(b);
+  }}
+}}
+</script>
+</body></html>"""
 
+# Append into a specific tab pane
 _OVERLAY_JS_APPEND = """
 (function() {{
-    var body = document.getElementById('body');
+    var pane = document.getElementById('tab-{tab}');
     var div = document.createElement('div');
     div.innerHTML = {html_json};
-    body.appendChild(div);
-    window.scrollTo(0, document.body.scrollHeight);
+    pane.appendChild(div);
+    pane.scrollTop = pane.scrollHeight;
+    {badge_call}
 }})();
 """
 
+# Update last child of a specific tab pane
 _OVERLAY_JS_UPDATE_LAST = """
 (function() {{
-    var body = document.getElementById('body');
-    var divs = body.children;
+    var pane = document.getElementById('tab-{tab}');
+    var divs = pane.children;
     if (divs.length > 0) {{
         divs[divs.length - 1].innerHTML = {html_json};
     }} else {{
         var div = document.createElement('div');
         div.innerHTML = {html_json};
-        body.appendChild(div);
+        pane.appendChild(div);
     }}
-    window.scrollTo(0, document.body.scrollHeight);
+    pane.scrollTop = pane.scrollHeight;
 }})();
 """
 
@@ -689,12 +765,13 @@ class VoiceOverlay:
     MINI_H      = 36
 
     def __init__(self, position: str = "top-right"):
-        self._window    = None
-        self._wv        = None
-        self._lines     = []   # list of (role, text, img_path)
-        self._position  = position
-        self._minimized = False
-        self._visible   = False
+        self._window      = None
+        self._wv          = None
+        self._lines       = []   # chat tab: list of (role, text, img_path)
+        self._alert_lines = []   # alerts tab: list of (role, text, img_path)
+        self._position    = position
+        self._minimized   = False
+        self._visible     = False
         self._build_window()
 
     def _dispatch(self, fn):
@@ -799,14 +876,15 @@ class VoiceOverlay:
         mini_btn.setTarget_(self._mini_helper)
         mini_btn.setAction_("minimize:")
 
-    def _js_append(self, role: str, text: str, img_path: str = ""):
-        html = _bubble_html(role, text, img_path)
-        js   = _OVERLAY_JS_APPEND.format(html_json=json.dumps(html))
+    def _js_append(self, role: str, text: str, img_path: str = "", tab: str = "chat"):
+        html  = _bubble_html(role, text, img_path)
+        badge = "badgeAlerts();" if tab == "alerts" else ""
+        js    = _OVERLAY_JS_APPEND.format(tab=tab, html_json=json.dumps(html), badge_call=badge)
         self._wv.evaluateJavaScript_completionHandler_(js, None)
 
-    def _js_update_last(self, role: str, text: str, img_path: str = ""):
+    def _js_update_last(self, role: str, text: str, img_path: str = "", tab: str = "chat"):
         html = _bubble_html(role, text, img_path)
-        js   = _OVERLAY_JS_UPDATE_LAST.format(html_json=json.dumps(html))
+        js   = _OVERLAY_JS_UPDATE_LAST.format(tab=tab, html_json=json.dumps(html))
         self._wv.evaluateJavaScript_completionHandler_(js, None)
 
     def show_listening(self):
@@ -917,20 +995,23 @@ class VoiceOverlay:
         self._dispatch(_fn)
 
     def show(self, text: str, auto_hide: bool = False):
+        """Show a system/notification message in the Alerts tab."""
         def _fn():
-            self._lines.append(("assistant", text, ""))
-            self._js_append("assistant", text)
+            self._alert_lines.append(("assistant", text, ""))
+            self._js_append("assistant", text, tab="alerts")
+            self._visible = True
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
 
     def update(self, text: str):
+        """Append or update a status message in the Alerts tab."""
         def _fn():
-            if self._lines and self._lines[-1][0] in ("status", "user_partial"):
-                self._lines[-1] = ("status", text, "")
-                self._js_update_last("status", text)
+            if self._alert_lines and self._alert_lines[-1][0] in ("status", "user_partial"):
+                self._alert_lines[-1] = ("status", text, "")
+                self._js_update_last("status", text, tab="alerts")
             else:
-                self._lines.append(("status", text, ""))
-                self._js_append("status", text)
+                self._alert_lines.append(("status", text, ""))
+                self._js_append("status", text, tab="alerts")
         self._dispatch(_fn)
 
     def show_permission_alert(self, tool: str, preview: str, session_title: str = "", tty: str = ""):
@@ -949,14 +1030,14 @@ class VoiceOverlay:
                 f'</div>'
             )
             html_str = f'<div class="bubble permission"><div class="body">{body}</div></div>'
-            if self._lines and self._lines[-1][0] == "permission":
-                self._lines[-1] = ("permission", tool, "")
-                js = _OVERLAY_JS_UPDATE_LAST.format(html_json=json.dumps(html_str))
+            if self._alert_lines and self._alert_lines[-1][0] == "permission":
+                self._alert_lines[-1] = ("permission", tool, "")
+                js = _OVERLAY_JS_UPDATE_LAST.format(tab="alerts", html_json=json.dumps(html_str))
+                self._wv.evaluateJavaScript_completionHandler_(js, None)
             else:
-                self._lines.append(("permission", tool, ""))
-                js = _OVERLAY_JS_APPEND.format(html_json=json.dumps(html_str))
-            self._wv.evaluateJavaScript_completionHandler_(js, None)
-            self._wv.evaluateJavaScript_completionHandler_("window.scrollTo(0,document.body.scrollHeight)", None)
+                self._alert_lines.append(("permission", tool, ""))
+                js = _OVERLAY_JS_APPEND.format(tab="alerts", html_json=json.dumps(html_str), badge_call="badgeAlerts();")
+                self._wv.evaluateJavaScript_completionHandler_(js, None)
             self._visible = True
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
@@ -1009,11 +1090,11 @@ end tell'''
 
     def clear_permission_alert(self):
         def _fn():
-            if self._lines and self._lines[-1][0] == "permission":
-                self._lines.pop()
+            if self._alert_lines and self._alert_lines[-1][0] == "permission":
+                self._alert_lines.pop()
                 js = """(function(){
-                    var body=document.getElementById('body');
-                    if(body.children.length>0) body.removeChild(body.children[body.children.length-1]);
+                    var pane=document.getElementById('tab-alerts');
+                    if(pane.children.length>0) pane.removeChild(pane.children[pane.children.length-1]);
                 })();"""
                 self._wv.evaluateJavaScript_completionHandler_(js, None)
         self._dispatch(_fn)
