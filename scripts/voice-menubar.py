@@ -2244,7 +2244,11 @@ location.href='file://{art_html}';
                 if TOOL_RUNNING_SIGNAL.exists():
                     sig = json.loads(TOOL_RUNNING_SIGNAL.read_text())
                     age = time.time() - sig.get("ts", 0)
-                    if age >= PERMISSION_WAIT_SECS and not self._permission_alerted:
+                    # Ignore signals from the voice agent's own session — it runs with
+                    # --dangerously-skip-permissions so long-running tools are never blocked
+                    voice_sid = VOICE_SESSION_FILE.read_text().strip() if VOICE_SESSION_FILE.exists() else ""
+                    is_voice_session = voice_sid and sig.get("session_id") == voice_sid
+                    if age >= PERMISSION_WAIT_SECS and not self._permission_alerted and not is_voice_session:
                         self._permission_alerted = True
                         play_sound(SOUND_START)
                         self._overlay.show_permission_alert(
