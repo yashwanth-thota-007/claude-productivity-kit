@@ -828,9 +828,15 @@ class VoiceOverlay:
         bar_h = self.BTN_H + 8
         bar_y = self.H - bar_h
 
-        # Bar background
+        # NSViewMinYMargin = 0x08 — flexible space below, view stays pinned to top
+        # This is critical: when the window shrinks to MINI_H on minimize, the
+        # content view shrinks too. Without this mask, bar_y=H-bar_h is outside
+        # the shrunken content view and the title bar disappears.
+        NSViewMinYMargin = 0x08
+
         from AppKit import NSView
         bar_bg = NSView.alloc().initWithFrame_(NSMakeRect(0, bar_y, self.W, bar_h))
+        bar_bg.setAutoresizingMask_(NSViewMinYMargin)
         bar_bg.setWantsLayer_(True)
         bar_bg.layer().setBackgroundColor_(
             NSColor.colorWithCalibratedRed_green_blue_alpha_(0.08, 0.08, 0.10, 1.0).CGColor()
@@ -841,6 +847,7 @@ class VoiceOverlay:
         title_lbl = NSTextField.alloc().initWithFrame_(
             NSMakeRect(8, bar_y + 4, self.W - 70, self.BTN_H)
         )
+        title_lbl.setAutoresizingMask_(NSViewMinYMargin)
         title_lbl.setStringValue_("🎙 Claude")
         title_lbl.setBezeled_(False)
         title_lbl.setDrawsBackground_(False)
@@ -854,6 +861,7 @@ class VoiceOverlay:
         mini_btn = NSButton.alloc().initWithFrame_(
             NSMakeRect(self.W - 54, bar_y + 4, 24, self.BTN_H)
         )
+        mini_btn.setAutoresizingMask_(NSViewMinYMargin)
         mini_btn.setTitle_("–")
         mini_btn.setBezelStyle_(0)
         mini_btn.setBordered_(False)
@@ -864,6 +872,7 @@ class VoiceOverlay:
         close_btn = NSButton.alloc().initWithFrame_(
             NSMakeRect(self.W - 28, bar_y + 4, 24, self.BTN_H)
         )
+        close_btn.setAutoresizingMask_(NSViewMinYMargin)
         close_btn.setTitle_("✕")
         close_btn.setBezelStyle_(0)
         close_btn.setBordered_(False)
