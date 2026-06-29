@@ -58,6 +58,9 @@ SOUND_IMAGE      = "Glass"
 SOUND_POMO       = "Sosumi"
 SOUND_SCREENSHOT = "Purr"
 
+TOOL_RUNNING_SIGNAL  = Path.home() / ".claude" / "tool-running.json"
+PERMISSION_WAIT_SECS = 12   # signal older than this triggers the alert
+
 LOG_PATH            = Path.home() / ".claude" / "voice-transcripts.jsonl"
 IMAGES_BASE         = Path.home() / ".claude" / "paste-images"
 ACTIVE_SID_FILE     = Path.home() / ".claude" / "active-session-id"
@@ -459,6 +462,14 @@ body {
     font-size: 12px;
     padding: 4px 6px;
 }
+.bubble.permission .body {
+    background: #3a2800;
+    border: 1px solid #c87e00;
+    border-radius: 10px;
+    color: #f5c542;
+    font-size: 12px;
+    padding: 8px 12px;
+}
 .bubble.partial .body { opacity: 0.6; }
 /* Markdown elements */
 p  { margin: 0 0 6px; }
@@ -830,6 +841,37 @@ class VoiceOverlay:
                 self._js_append("status", text)
         self._dispatch(_fn)
 
+    def show_permission_alert(self, tool: str, preview: str):
+        def _fn():
+            label = f"⚠️ Waiting for permission"
+            body  = f"<strong>{label}</strong><br>{tool}"
+            if preview:
+                body += f"<br><code>{preview}</code>"
+            html  = f'<div class="bubble permission"><div class="body">{body}</div></div>'
+            # Replace previous permission bubble if there is one, otherwise append
+            if self._lines and self._lines[-1][0] == "permission":
+                self._lines[-1] = ("permission", tool, "")
+                js = _OVERLAY_JS_UPDATE_LAST.format(html_json=json.dumps(html))
+            else:
+                self._lines.append(("permission", tool, ""))
+                js = _OVERLAY_JS_APPEND.format(html_json=json.dumps(html))
+            self._wv.evaluateJavaScript_completionHandler_(js, None)
+            self._wv.evaluateJavaScript_completionHandler_("window.scrollTo(0,document.body.scrollHeight)", None)
+            self._visible = True
+            self._window.orderFrontRegardless()
+        self._dispatch(_fn)
+
+    def clear_permission_alert(self):
+        def _fn():
+            if self._lines and self._lines[-1][0] == "permission":
+                self._lines.pop()
+                js = """(function(){
+                    var body=document.getElementById('body');
+                    if(body.children.length>0) body.removeChild(body.children[body.children.length-1]);
+                })();"""
+                self._wv.evaluateJavaScript_completionHandler_(js, None)
+        self._dispatch(_fn)
+
 
 class _CloseHelper(NSObject):
     def close_(self, sender):
@@ -874,6 +916,9 @@ class VoiceApp(rumps.App):
         self._last_speech   = 0.0   # timestamp of last frame with speech
         self._silence_timer = None
         self._live_t        = None  # LiveTranscriber instance (Claude mode)
+
+        # Permission-wait tracking
+        self._permission_alerted = False
 
         # Wake word
         self._wake_listener = WakeWordListener(on_triggered=self._on_wake_word)
@@ -1859,6 +1904,25 @@ location.href='file://{art_html}';
                         if content and signal.get("type") == "session_end":
                             play_sound(SOUND_STOP)
                             self._overlay.show(f"**Session complete**\n\n{content}")
+            except Exception:
+                pass
+
+            try:
+                # Permission-wait alert — show overlay if a tool has been waiting > PERMISSION_WAIT_SECS
+                if TOOL_RUNNING_SIGNAL.exists():
+                    sig = json.loads(TOOL_RUNNING_SIGNAL.read_text())
+                    age = time.time() - sig.get("ts", 0)
+                    if age >= PERMISSION_WAIT_SECS and not self._permission_alerted:
+                        self._permission_alerted = True
+                        play_sound(SOUND_START)
+                        self._overlay.show_permission_alert(
+                            sig.get("tool", "tool"),
+                            sig.get("preview", ""),
+                        )
+                elif self._permission_alerted:
+                    # Tool completed — clear the alert
+                    self._permission_alerted = False
+                    self._overlay.clear_permission_alert()
             except Exception:
                 pass
 
