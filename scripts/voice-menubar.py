@@ -823,12 +823,12 @@ class VoiceOverlay:
 
         cv = win.contentView()
 
-        # Title bar at the bottom of the content view — stays visible when minimized
-        # (window shrinks from top, bottom stays fixed in screen coords)
-        bar_y = 0
+        # Title bar sits at the TOP of the content view (AppKit y=0 is bottom,
+        # so top = H - bar_h in content-view coords)
         bar_h = self.BTN_H + 8
+        bar_y = self.H - bar_h
 
-        # Mini-bar background — dark strip
+        # Bar background
         from AppKit import NSView
         bar_bg = NSView.alloc().initWithFrame_(NSMakeRect(0, bar_y, self.W, bar_h))
         bar_bg.setWantsLayer_(True)
@@ -870,8 +870,8 @@ class VoiceOverlay:
         close_btn.setFont_(NSFont.systemFontOfSize_(12.0))
         cv.addSubview_(close_btn)
 
-        # WKWebView fills area above the title bar
-        wv_rect = NSMakeRect(0, bar_h, self.W, self.H - bar_h)
+        # WKWebView fills the area below the title bar
+        wv_rect = NSMakeRect(0, 0, self.W, self.H - bar_h)
         cfg = WKWebViewConfiguration.alloc().init()
         # Register JS message handler for Allow/Deny button clicks
         self._msg_handler = _PermissionMessageHandler.alloc().init()
@@ -985,9 +985,10 @@ class VoiceOverlay:
             from AppKit import NSScreen
             frame = NSScreen.mainScreen().frame()
             x, y  = self._compute_origin(frame)
-            # Keep the bottom bar at the same screen position — shrink height only
+            # AppKit origin is bottom-left. To keep the top edge fixed while
+            # shrinking height, shift y up by (H - MINI_H).
             self._window.setFrame_display_(
-                NSMakeRect(x, y, self.W, self.MINI_H), True
+                NSMakeRect(x, y + self.H - self.MINI_H, self.W, self.MINI_H), True
             )
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
@@ -1000,6 +1001,7 @@ class VoiceOverlay:
             from AppKit import NSScreen
             frame = NSScreen.mainScreen().frame()
             x, y  = self._compute_origin(frame)
+            # Restore: shift y back down to original origin.
             self._window.setFrame_display_(
                 NSMakeRect(x, y, self.W, self.H), True
             )
