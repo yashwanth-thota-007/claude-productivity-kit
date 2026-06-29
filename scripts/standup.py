@@ -6,7 +6,7 @@ Usage:
   python3 ~/.claude/scripts/standup.py           # post to Slack
   python3 ~/.claude/scripts/standup.py --dry-run # print only, no post
 
-Reads SLACK_STANDUP_WEBHOOK from environment (set in settings.json env block).
+Reads SLACK_STANDUP_WEBHOOK from environment or ~/.claude/.env.
 """
 import json, os, sys, boto3, urllib.request, urllib.error
 from pathlib import Path
@@ -121,7 +121,15 @@ def main():
 
     webhook = os.environ.get("SLACK_STANDUP_WEBHOOK", "")
     if not webhook:
-        print("No SLACK_STANDUP_WEBHOOK in environment — set it in settings.json env block.", file=sys.stderr)
+        # Fallback: load from ~/.claude/.env
+        env_file = Path.home() / ".claude" / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                if line.startswith("SLACK_STANDUP_WEBHOOK="):
+                    webhook = line.split("=", 1)[1].strip()
+                    break
+    if not webhook:
+        print("No SLACK_STANDUP_WEBHOOK — add it to ~/.claude/.env", file=sys.stderr)
         sys.exit(1)
 
     ok = post_to_slack(webhook, standup)

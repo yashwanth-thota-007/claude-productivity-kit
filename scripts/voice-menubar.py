@@ -470,6 +470,34 @@ body {
     font-size: 12px;
     padding: 8px 12px;
 }
+.permission-title { font-weight: bold; margin-bottom: 4px; font-size: 12px; }
+.permission-session { font-size: 11px; color: #d4a017; margin-bottom: 6px; }
+.permission-cmd {
+    background: #1e1800;
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: #ffd980;
+    word-break: break-all;
+    margin-bottom: 8px;
+    max-height: 80px;
+    overflow-y: auto;
+}
+.permission-btns { display: flex; gap: 6px; }
+.perm-btn {
+    flex: 1;
+    padding: 5px 0;
+    border-radius: 6px;
+    border: none;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.perm-btn.allow { background: #1a6e1a; color: #90ee90; }
+.perm-btn.deny  { background: #6e1a1a; color: #ff9090; }
+.perm-btn:hover.allow { background: #228b22; }
+.perm-btn:hover.deny  { background: #8b0000; }
 .bubble.partial .body { opacity: 0.6; }
 /* Markdown elements */
 p  { margin: 0 0 6px; }
@@ -682,6 +710,12 @@ class VoiceOverlay:
         # WKWebView fills area below buttons
         wv_rect = NSMakeRect(0, 0, self.W, self.H - self.BTN_H - 8)
         cfg = WKWebViewConfiguration.alloc().init()
+        # Register JS message handler for Allow/Deny button clicks
+        self._msg_handler = _PermissionMessageHandler.alloc().init()
+        self._msg_handler._overlay = self
+        cfg.userContentController().addScriptMessageHandler_name_(
+            self._msg_handler, "permissionAction"
+        )
         wv = WKWebView.alloc().initWithFrame_configuration_(wv_rect, cfg)
         # Disable WKWebView's own background so the NSWindow dark bg shows through
         wv.setValue_forKey_(False, "drawsBackground")
@@ -841,25 +875,79 @@ class VoiceOverlay:
                 self._js_append("status", text)
         self._dispatch(_fn)
 
-    def show_permission_alert(self, tool: str, preview: str):
+    def show_permission_alert(self, tool: str, preview: str, session_title: str = "", tty: str = ""):
+        self._permission_tty = tty
         def _fn():
-            label = f"⚠️ Waiting for permission"
-            body  = f"<strong>{label}</strong><br>{tool}"
-            if preview:
-                body += f"<br><code>{preview}</code>"
-            html  = f'<div class="bubble permission"><div class="body">{body}</div></div>'
-            # Replace previous permission bubble if there is one, otherwise append
+            import html as _html
+            session_html = f'<div class="permission-session">📋 {_html.escape(session_title)}</div>' if session_title else ""
+            cmd_html     = f'<div class="permission-cmd">{_html.escape(preview)}</div>' if preview else ""
+            body = (
+                f'<div class="permission-title">⚠️ Waiting for permission — {_html.escape(tool)}</div>'
+                f'{session_html}'
+                f'{cmd_html}'
+                f'<div class="permission-btns">'
+                f'<button class="perm-btn allow" onclick="webkit.messageHandlers.permissionAction.postMessage(\'allow\')">✓ Allow</button>'
+                f'<button class="perm-btn deny"  onclick="webkit.messageHandlers.permissionAction.postMessage(\'deny\')">✕ Deny</button>'
+                f'</div>'
+            )
+            html_str = f'<div class="bubble permission"><div class="body">{body}</div></div>'
             if self._lines and self._lines[-1][0] == "permission":
                 self._lines[-1] = ("permission", tool, "")
-                js = _OVERLAY_JS_UPDATE_LAST.format(html_json=json.dumps(html))
+                js = _OVERLAY_JS_UPDATE_LAST.format(html_json=json.dumps(html_str))
             else:
                 self._lines.append(("permission", tool, ""))
-                js = _OVERLAY_JS_APPEND.format(html_json=json.dumps(html))
+                js = _OVERLAY_JS_APPEND.format(html_json=json.dumps(html_str))
             self._wv.evaluateJavaScript_completionHandler_(js, None)
             self._wv.evaluateJavaScript_completionHandler_("window.scrollTo(0,document.body.scrollHeight)", None)
             self._visible = True
             self._window.orderFrontRegardless()
         self._dispatch(_fn)
+
+    def _handle_permission_action(self, action: str):
+        """Called by _PermissionMessageHandler when Allow/Deny is clicked."""
+        tty = getattr(self, "_permission_tty", "")
+        key = "y" if action == "allow" else "n"
+        threading.Thread(target=self._send_permission_key, args=(key, tty), daemon=True).start()
+        self.clear_permission_alert()
+
+    def _send_permission_key(self, key: str, tty: str):
+        """Send y/n keystroke to the Claude terminal session."""
+        sent = False
+        # Try writing directly to the tty if we have one
+        if tty:
+            try:
+                with open(tty, "w") as f:
+                    f.write(key + "\n")
+                sent = True
+            except Exception:
+                pass
+        # Fallback: AppleScript to iTerm2 — type into the session whose tty matches
+        if not sent and tty:
+            script = f'''
+tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if tty of s contains "{tty.replace("/dev/", "")}" then
+                    tell s to write text "{key}"
+                    return
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell'''
+            try:
+                subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+                sent = True
+            except Exception:
+                pass
+        # Last resort: send to frontmost iTerm2 session
+        if not sent:
+            script = f'tell application "iTerm2" to tell current session of current window to write text "{key}"'
+            try:
+                subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+            except Exception:
+                pass
 
     def clear_permission_alert(self):
         def _fn():
@@ -871,6 +959,13 @@ class VoiceOverlay:
                 })();"""
                 self._wv.evaluateJavaScript_completionHandler_(js, None)
         self._dispatch(_fn)
+
+
+class _PermissionMessageHandler(NSObject):
+    """Receives JS messages from Allow/Deny buttons in the permission bubble."""
+    def userContentController_didReceiveScriptMessage_(self, controller, message):
+        action = str(message.body())  # "allow" or "deny"
+        self._overlay._handle_permission_action(action)
 
 
 class _CloseHelper(NSObject):
@@ -1918,6 +2013,8 @@ location.href='file://{art_html}';
                         self._overlay.show_permission_alert(
                             sig.get("tool", "tool"),
                             sig.get("preview", ""),
+                            session_title=sig.get("session_title", ""),
+                            tty=sig.get("tty", ""),
                         )
                 elif self._permission_alerted:
                     # Tool completed — clear the alert
