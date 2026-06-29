@@ -104,6 +104,10 @@ DEFAULT_SILENCE      = 1.5
 DEFAULT_POMO_PRESETS = [25, 50, 90]
 DEFAULT_OVERLAY_POS  = "top-right"
 DEFAULT_WAKE_WORD    = False
+DEFAULT_TTS          = False
+DEFAULT_TTS_VOICE    = "Samantha"
+
+TTS_MAX_CHARS = 400   # truncate spoken text beyond this
 
 SILENCE_OPTIONS          = [0.5, 1.0, 1.5, 2.0, 3.0]
 OVERLAY_POSITIONS        = ["top-right", "top-left", "bottom-right", "bottom-left"]
@@ -143,6 +147,8 @@ def load_settings() -> dict:
         "pomo_presets": DEFAULT_POMO_PRESETS,
         "overlay_pos":  DEFAULT_OVERLAY_POS,
         "wake_word":    DEFAULT_WAKE_WORD,
+        "tts":          DEFAULT_TTS,
+        "tts_voice":    DEFAULT_TTS_VOICE,
     }
     if SETTINGS_FILE.exists():
         try:
@@ -185,6 +191,48 @@ def play_sound(name: str):
         s = NSSound.soundNamed_(name)
         if s:
             s.play()
+
+
+_MD_STRIP_RE = None
+
+def _md_strip(text: str) -> str:
+    """Remove markdown so TTS reads clean prose."""
+    import re
+    global _MD_STRIP_RE
+    if _MD_STRIP_RE is None:
+        _MD_STRIP_RE = re.compile(
+            r"```.*?```|`[^`]+`"          # code blocks / inline code
+            r"|!\[.*?\]\(.*?\)"           # images
+            r"|\[([^\]]+)\]\([^)]+\)"     # links → keep label
+            r"|#{1,6}\s+"                 # headings
+            r"|\*{1,3}([^*]+)\*{1,3}"    # bold/italic → keep text
+            r"|_{1,3}([^_]+)_{1,3}"      # underline/italic → keep text
+            r"|\|[^\n]+\|"               # table rows
+            r"|^[-*+]\s+"                # list bullets
+            r"|^\d+\.\s+",               # numbered list
+            re.DOTALL | re.MULTILINE,
+        )
+    # Replace patterns, keeping capture groups (link labels, bold text)
+    def _sub(m):
+        return m.group(2) or m.group(3) or m.group(1) or " "
+    clean = _MD_STRIP_RE.sub(_sub, text)
+    # Collapse extra whitespace
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean
+
+
+def speak(text: str, voice: str = DEFAULT_TTS_VOICE):
+    """Speak text via macOS say in a background thread. Fire-and-forget."""
+    clean = _md_strip(text)
+    if len(clean) > TTS_MAX_CHARS:
+        clean = clean[:TTS_MAX_CHARS].rsplit(" ", 1)[0] + "… see overlay for full response."
+    if clean:
+        threading.Thread(
+            target=subprocess.run,
+            args=(["say", "-v", voice, clean],),
+            kwargs={"capture_output": True},
+            daemon=True,
+        ).start()
 
 
 def load_log() -> deque:
@@ -1136,6 +1184,11 @@ class VoiceApp(rumps.App):
         self._wake_item.state = self._cfg["wake_word"]
         settings_menu.add(self._wake_item)
 
+        # TTS toggle
+        self._tts_item = rumps.MenuItem("  Voice reply (TTS)", callback=self._toggle_tts)
+        self._tts_item.state = self._cfg["tts"]
+        settings_menu.add(self._tts_item)
+
         # Focus guard status + reset in Pomodoro menu
         self._focus_status_item = rumps.MenuItem("🧠 Focus: 0 sessions")
         self._focus_reset_item  = rumps.MenuItem("  Reset focus guard", callback=self._reset_focus_guard)
@@ -1329,6 +1382,17 @@ class VoiceApp(rumps.App):
         else:
             self._wake_listener.stop()
             self.status_item.title = "Status: Wake word OFF"
+        threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
+
+    def _toggle_tts(self, sender):
+        enabled = not self._cfg["tts"]
+        self._cfg["tts"] = enabled
+        save_settings(self._cfg)
+        self._tts_item.state = enabled
+        label = "ON — Claude will speak responses" if enabled else "OFF"
+        self.status_item.title = f"Status: Voice reply {label}"
+        if enabled:
+            speak("Voice reply enabled.", voice=self._cfg["tts_voice"])
         threading.Timer(2.0, lambda: self._reset_idle("Ready")).start()
 
     def _start_recording(self):
@@ -1835,6 +1899,9 @@ location.href='file://{art_html}';
             diff_summary = self._agentfs_diff(session_name)
             if diff_summary:
                 self._overlay.stream_chunk(accumulated + diff_summary)
+
+        if self._cfg.get("tts") and accumulated:
+            speak(accumulated, voice=self._cfg.get("tts_voice", DEFAULT_TTS_VOICE))
 
         play_sound(SOUND_STOP)
         self._reset_idle("Ready")
